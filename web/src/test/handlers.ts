@@ -145,6 +145,40 @@ export const handlers = [
   ),
   http.delete('/api/aliases/:id', () => HttpResponse.json({ success: true, data: { anonymous_id: 'anon_1' } })),
 
+  // 取件链接:管理侧生成/撤销 + 公开侧取件
+  http.post('/api/aliases/:id/share-link', () =>
+    HttpResponse.json({
+      success: true,
+      data: {
+        alias: 'alpha@icloud.com',
+        token: 'tok_test_token',
+        url: 'http://localhost:8081/?token=tok_test_token',
+        created_at: '2026-09-16T22:00:00+08:00',
+        hits: 0,
+      },
+    }),
+  ),
+  http.delete('/api/aliases/:id/share-link', () =>
+    HttpResponse.json({ success: true, data: { alias: 'alpha@icloud.com', removed: true } }),
+  ),
+  http.get('/api/share/:token/inbox/:id', () =>
+    HttpResponse.json({
+      success: true,
+      data: {
+        ...MESSAGES[0],
+        body: '点击链接完成验证：https://example.com/verify',
+        body_html_sanitized: '<p>点击链接完成验证：<a href="https://example.com/verify">verify</a></p>',
+        content_type: 'text/html',
+      },
+    }),
+  ),
+  http.get('/api/share/:token/inbox', () =>
+    HttpResponse.json({
+      success: true,
+      data: { alias: 'alpha@icloud.com', count: MESSAGES.length, messages: MESSAGES, method: 'imap' },
+    }),
+  ),
+
   // 后台自动建满任务（多账号）
   http.get('/api/autocreate', () =>
     HttpResponse.json({

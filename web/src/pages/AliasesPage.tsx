@@ -25,12 +25,14 @@ import {
   InboxOutlined,
   PlusOutlined,
   ReloadOutlined,
+  LinkOutlined,
   StopOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons'
 import { ApiError, request } from '../api/client'
 import { useAccounts, useFetch } from '../api/hooks'
 import AutoCreatePanel from '../components/AutoCreatePanel'
+import ShareLinkModal from '../components/ShareLinkModal'
 import type { Alias, AliasListResult, CreateAliasResult } from '../api/types'
 import { formatDateTime, timestampValue } from '../utils/format'
 
@@ -43,6 +45,7 @@ export default function AliasesPage() {
 
   const [createOpen, setCreateOpen] = useState(false)
   const [autoOpen, setAutoOpen] = useState(false)
+  const [shareFor, setShareFor] = useState<Alias | null>(null)
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState('')
   const [created, setCreated] = useState<CreateAliasResult | null>(null)
@@ -195,6 +198,15 @@ export default function AliasesPage() {
               取件
             </Button>
           </Link>
+          <Button
+            type="link"
+            size="small"
+            icon={<LinkOutlined />}
+            title="生成可分享的只读取件链接"
+            onClick={() => setShareFor(alias)}
+          >
+            取件链接{alias.shareToken ? '（已生成）' : ''}
+          </Button>
           <Popconfirm
             title={alias.active ? '停用该别名？' : '重新激活该别名？'}
             description={
@@ -316,6 +328,16 @@ export default function AliasesPage() {
           scroll={{ x: 860 }}
         />
       </Card>
+
+      {shareFor && (
+        <ShareLinkModal
+          key={shareFor.anonymousId}
+          accountId={accountId}
+          alias={shareFor}
+          onClose={() => setShareFor(null)}
+          onChanged={reload}
+        />
+      )}
 
       <AutoCreatePanel
         open={autoOpen}

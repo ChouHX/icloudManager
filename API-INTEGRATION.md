@@ -326,7 +326,40 @@ ICLOUD_HME_IMAP_POOL_SIZE=2  6 并发总耗时 6.4s    ← 2 路并行
 - **并发上限不是越高越好**：iCloud 对单个账号的 IMAP 连接数有隐藏限制，实测中并发连接数超过约 2–3 条后，服务端侧的握手/登录响应会变慢。10 条是兼顾吞吐与稳定的默认值，账号风控敏感时可调小
 - **同账号并发收益有限**：读信本身是低频操作，若只是轮询取件，1–2 条连接通常就够；真正需要线性提升吞吐时，多账号并行的效果更确定
 
-## 7. 已知限制
+## 7. 取件链接（分享给别人看邮件）
+
+除了用管理员会话调用接口，还可以给单个别名生成一条**只读链接**，让别的程序或人直接取件：
+
+```bash
+# 1) 管理员侧生成(幂等,重复调用返回同一个 token)
+curl -b jar.txt -X POST "$BASE/api/aliases/abc123/share-link" \
+  -H 'Content-Type: application/json' -H "X-CSRF-Token: $CSRF" \
+  -d '{"account_id":"acc_1"}'
+# → data.url 形如 http://host:port/?token=xxxxx,直接分享这个地址
+
+# 2) 拿到链接的程序/人直接取件(不需要任何 Cookie)
+curl "$BASE/api/share/xxxxx/inbox?limit=20&days=7"           # 邮件列表
+curl "$BASE/api/share/xxxxx/inbox/1042"                      # 邮件正文
+
+# 3) 不再需要时撤销
+curl -b jar.txt -X DELETE "$BASE/api/aliases/abc123/share-link" \
+  -H 'Content-Type: application/json' -H "X-CSRF-Token: $CSRF" \
+  -d '{"account_id":"acc_1"}'
+```
+
+与管理员接口的差异：
+
+| 项目 | 管理员接口 | 取件链接 |
+|---|---|---|
+| 认证 | 会话 Cookie（+ 写操作要 CSRF） | 仅需 URL 里的 token |
+| 可见范围 | 账号下全部别名 | 仅该 token 对应的一个别名 |
+| 可做操作 | 读、删邮件、管理账号 | 只读 |
+| 响应字段 | 含 `account_id` | 不含任何账号内部标识 |
+| 失效方式 | 会话过期 | 撤销链接，或重新生成（轮换 token） |
+
+token 泄露等同于"该别名收件箱的只读权限"，请按需要分发；链接会记录命中次数与最近使用时间，可在别名列表的弹窗里查看并随时撤销。
+
+## 8. 已知限制
 
 - **读正文与删除仅支持 IMAP 路径**：`method` 为 `web_api` 时，`messages[].id` 不是 IMAP UID，`GET/DELETE /api/inbox/:id` 会返回 `400`。给账号配置 App 专用密码或外部收件邮箱后即可用
 - **`days` 仅 IMAP 生效**：Web API 回退路径只按 `limit` 截断

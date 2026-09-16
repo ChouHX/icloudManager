@@ -189,7 +189,71 @@ Content-Type: application/json
 
 ---
 
-### 3.4 自动建满别名（后台任务）
+### 3.4 取件链接（只读分享）
+
+给某个别名生成一条链接，持有链接的人可以**只读**查看该别名收到的邮件，不需要管理员会话：
+
+```
+POST   /api/aliases/:id/share-link     生成链接（需 X-CSRF-Token，幂等）
+DELETE /api/aliases/:id/share-link     撤销链接（需 X-CSRF-Token）
+GET    /api/share/:token/inbox         公开：邮件列表（无需会话）
+GET    /api/share/:token/inbox/:id     公开：邮件正文（无需会话）
+```
+
+生成（`:id` 是别名的 `anonymousId`）：
+
+```http
+POST /api/aliases/abc123/share-link
+X-CSRF-Token: <token>
+Content-Type: application/json
+
+{ "account_id": "acc_1a2b3c4d" }
+```
+
+```json
+{
+  "success": true,
+  "data": {
+    "alias": "alpha@icloud.com",
+    "token": "V2oPcBxqPBNgxVmjZ6RFPmXsEBpELf2169Yo_f44Ips",
+    "url": "http://localhost:8081/?token=V2oPcBxqPBNgxVmjZ6RFPmXsEBpELf2169Yo_f44Ips",
+    "created_at": "2026-01-15T10:30:00+08:00",
+    "hits": 0
+  }
+}
+```
+
+同一别名重复调用返回**同一个 token**（幂等），`url` 由请求的 Host 与协议推断，可直接分享。撤销后 token 立即失效，再次生成会轮换出新 token。
+
+公开取件（`GET /api/share/:token/inbox` 支持 `limit`、`days`，取值同第 4 节）：
+
+```json
+{
+  "success": true,
+  "data": {
+    "alias": "alpha@icloud.com",
+    "count": 2,
+    "method": "imap",
+    "messages": [
+      { "id": "1042", "from": "GitHub <noreply@github.com>", "to": "alpha@icloud.com",
+        "subject": "请验证你的邮箱", "date": "2026-01-15T10:30:00+08:00", "preview": "验证码 654321" }
+    ]
+  }
+}
+```
+
+`GET /api/share/:token/inbox/:id` 返回与 `/api/inbox/:id` 相同的正文字段（`body` / `body_html` / `body_html_sanitized` / `content_type`）。
+
+安全约定：
+
+- token 是 256 位随机值的 base64url 编码，不携带账号或地址信息，**不可猜测**
+- 访问范围被强制限定在 token 对应的那个别名：列表按该地址过滤，读正文时会逐封核对收件人（IMAP UID 是账号级全局编号，不核对就能读到同账号其它别名的邮件）
+- 公开响应**不包含** `account_id` 等账号内部标识，也不提供删除等写操作
+- token 无效或已撤销返回 `404 SHARE_INVALID`
+- 每条链接记录命中次数与最近使用时间（`data/share_links.json`，0600），便于发现异常访问；可在管理界面随时撤销
+
+### 3.5 自动建满别名（后台任务）
+
 
 ```http
 GET  /api/autocreate         查询任务状态
@@ -722,6 +786,7 @@ try {
 | `VALIDATION_ERROR` | 404 | `/api/*` 下未知路径（"接口不存在"） |
 | `ACCOUNT_NOT_FOUND` | 404 | 账号 ID 不存在 |
 | `TASK_RUNNING` | 409 | 已有自动建满任务在运行（`POST /api/autocreate/start`） |
+| `SHARE_INVALID` | 404 | 取件链接无效或已被撤销（`/api/share/:token/*`） |
 | `OTP_REQUIRED` | 409 | 账号启用 2FA 但未提供 `otp_code` |
 | `OTP_INVALID` | 401 | OTP 验证码错误 |
 | `UPSTREAM_UNAUTHORIZED` | 401 | iCloud 会话/Cookie 失效，需更新凭据 |

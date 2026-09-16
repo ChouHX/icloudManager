@@ -43,6 +43,25 @@ export interface Alias {
   label: string
   active: boolean
   createdAt?: string
+  /** 已生成的取件链接 token;未生成时不出现 */
+  shareToken?: string
+}
+
+/** 取件链接(凭 token 只读查看某个别名的邮件) */
+export interface ShareLink {
+  alias: string
+  token: string
+  url: string
+  created_at: string
+  hits?: number
+}
+
+/** 凭取件链接获取的收件箱(响应不含账号信息) */
+export interface ShareInboxResult {
+  alias: string
+  count: number
+  messages: InboxMessage[]
+  method: 'imap' | 'web_api'
 }
 
 export interface AliasListResult {

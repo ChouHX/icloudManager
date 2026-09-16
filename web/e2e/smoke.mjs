@@ -148,6 +148,35 @@ async function main() {
   await page.route('**/api/create', (route) =>
     route.fulfill(json({ email: 'gamma@icloud.com', label: '新用途', created_at: '2026-08-06T10:00:00+08:00', account_id: ACCOUNT.id })),
   )
+  // 取件链接的管理侧接口(别名来自 mock,这里也一并打桩,注册顺序在别名列表之后)
+  const E2E_SHARE_TOKEN = 'e2e_share_token'
+  await page.route('**/api/aliases/*/share-link', (route) => {
+    if (route.request().method() === 'DELETE') {
+      return route.fulfill(json({ alias: 'alpha@icloud.com', removed: true }))
+    }
+    return route.fulfill(json({
+      alias: 'alpha@icloud.com',
+      token: E2E_SHARE_TOKEN,
+      url: `${BASE_URL}/?token=${E2E_SHARE_TOKEN}`,
+      created_at: '2026-09-16T22:00:00+08:00',
+      hits: 0,
+    }))
+  })
+
+  // 凭取件链接的公开接口(不经过管理员会话)
+  await page.route('**/api/share/**', (route) => {
+    const path = new URL(route.request().url()).pathname
+    if (/^\/api\/share\/[^/]+\/inbox\/[^/]+$/.test(path)) {
+      return route.fulfill(json({
+        ...MESSAGE,
+        body: '点击链接完成验证：https://example.com/verify',
+        body_html_sanitized: '<p>点击链接完成验证：</p>',
+        content_type: 'text/html',
+      }))
+    }
+    return route.fulfill(json({ alias: 'alpha@icloud.com', count: 1, messages: [MESSAGE], method: 'imap' }))
+  })
+
   await page.route('**/api/inbox**', (route) => {
     const path = new URL(route.request().url()).pathname
     if (/^\/api\/inbox\/[^/]+$/.test(path)) {
@@ -218,6 +247,23 @@ async function main() {
 
     await page.locator('.ant-drawer-close').last().click()
     await page.waitForTimeout(400)
+
+    // 5.1 取件链接:生成 + 凭链接只读访问
+    await page.getByRole('button', { name: /取件链接/ }).first().click()
+    const linkModal = page.locator('.ant-modal').filter({ hasText: '取件链接' })
+    await linkModal.getByText(/持有该链接的人可以只读查看/).waitFor()
+    const shareURL = (await linkModal.locator('.mono').first().innerText()).trim()
+    check('生成取件链接', /\/\?token=[A-Za-z0-9_-]+$/.test(shareURL), shareURL)
+    await linkModal.getByRole('button', { name: /完\s*成/ }).click()
+    await page.waitForTimeout(400)
+
+    await page.goto(shareURL)
+    await page.getByText('隐私邮箱收件箱').waitFor()
+    check('凭链接进入只读取件页', await page.getByText('请验证你的邮箱').isVisible())
+    check('公开页不显示管理入口', (await page.getByRole('menuitem', { name: '账号设置' }).count()) === 0)
+    await page.goto(BASE_URL)
+    await page.waitForURL('**/aliases')
+    await page.getByText('alpha@icloud.com').waitFor()
 
     // 6. 创建别名
     await page.getByRole('button', { name: /创建别名/ }).click()
