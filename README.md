@@ -2,18 +2,17 @@
 
 [English](#english) | 中文
 
-通过逆向 iCloud Web 接口和 IMAP 邮件协议，实现 Apple iCloud 隐藏邮箱别名的创建、列出和邮件收取功能。内置中文管理界面（React 单页应用，随二进制内嵌分发）。
+通过逆向 iCloud Web 接口和 IMAP 邮件协议，实现 Apple iCloud 隐藏邮箱别名的创建、列出和邮件收取功能。内置中文管理界面（React 19 + Ant Design 单页应用，随二进制内嵌分发），界面只聚焦两件事：**创建别名** 与 **取件**。
 
 ## 功能特性
 
-- ✅ **中文管理界面** — 浏览器访问 `http://localhost:8081` 即开即用
-- ✅ **创建 HME 别名** — 自动生成 iCloud 隐藏邮箱地址
-- ✅ **列出所有别名** — 查看账号下的所有 HME 别名
-- ✅ **收取邮件** — 通过 IMAP 或 Web API 读取发到 HME 别名的邮件
-- ✅ **双路径读信** — 邮件读取优先走 IMAP (App Password),无 App Password 时回退 Web API (Cookie)
-- ✅ **多账号管理** — 支持多个 iCloud 账号并行管理
-- ✅ **双认证模式** — Cookie (创建别名 + 读邮件回退) 和 App Password (IMAP 优先)
-- ✅ **安全模型** — 单管理员会话、CSRF 校验、登录限流、响应脱敏
+- ✅ **极简中文界面** — 三个页面（创建别名 / 取件 / 账号设置），浏览器访问 `http://localhost:8081` 即开即用
+- ✅ **创建别名** — 一键生成 Hide My Email 地址，支持标签、复制、停用/激活/删除
+- ✅ **取件** — 按别名与时间范围筛选邮件；详情按 HTML 排版渲染（sandbox 隔离，脚本与追踪像素都不会生效），可一键切换纯文本，支持删除
+- ✅ **双路径读信** — 优先 IMAP (App 专用密码)，缺失时回退 Web API (Cookie)
+- ✅ **自动建满** — 后台按间隔自动创建别名直到达到目标总数，命中限流自动冷却续跑，界面可看进度与日志
+- ✅ **多账号管理** — 多账号并行，Cookie / App 密码 / 收件邮箱集中配置
+- ✅ **安全模型** — 单管理员会话、CSRF 校验、登录限流、响应脱敏、严格 CSP
 
 ## 快速开始
 
@@ -80,8 +79,9 @@ go build -o icloud-hme .
 | 环境变量 | 说明 | 默认 |
 |---|---|---|
 | `ICLOUD_HME_ADMIN_PASSWORD` | 管理员密码，**必填**，至少 8 字符 | 无（缺失时拒绝启动） |
-| `ICLOUD_HME_SESSION_TTL` | 会话有效期 | `12h`（范围 `15m`–`168h`） |
+| `ICLOUD_HME_SESSION_TTL` | 会话有效期，超出范围会拒绝启动 | `12h`（范围 `15m`–`168h`） |
 | `ICLOUD_HME_SECURE_COOKIE` | 通过 TLS 反向代理部署时设为 `true` | `false` |
+| `ICLOUD_HME_IMAP_POOL_SIZE` | 每账号 IMAP 并发连接数（取件并行度，范围 1–50） | `10` |
 
 > **Breaking Change（v0.3+）**：升级后未设置 `ICLOUD_HME_ADMIN_PASSWORD` 将拒绝启动；
 > 原有匿名 API 调用将收到 `401 AUTH_REQUIRED`。管理员会话只存内存，进程重启即失效。
@@ -130,331 +130,72 @@ export ICLOUD_HME_ADMIN_PASSWORD='your-strong-password'
 ./icloud-hme_linux_amd64 -h
 ```
 
-服务默认监听 `:8081`。浏览器打开 `http://localhost:8081` 进入管理界面（账号 / 别名 / 收件箱）。完整 API 契约见 [API.md](API.md)。
+服务默认监听 `:8081`。浏览器打开 `http://localhost:8081` 进入管理界面（创建别名 / 取件 / 账号设置）。完整 API 契约见 [API.md](API.md)。
 
 ## API 接口
 
-> **认证**：除 `POST /api/auth/login` 与 `GET /api/auth/session` 外，所有 `/api` 接口都需要管理员会话 Cookie（`hme_session`）；非 GET/HEAD/OPTIONS 请求还需携带 `X-CSRF-Token` 请求头。完整契约与 curl 示例见 [API.md](API.md)。
+- 程序接入（获取别名列表 + 取件）：**[API-INTEGRATION.md](API-INTEGRATION.md)**，含 Python / Go / Node 三种可运行示例，以及并发能力说明（跨账号并行、同账号串行）
+- 完整接口契约、字段表、错误码与端到端示例：**[API.md](API.md)**
 
-### 核心接口
+日常只需要两个调用：
 
-#### 创建 HME 别名
-
-```bash
-POST /api/create
-
-# 请求体
-{
-  "account_id": "acc_1",      # 必填: 账号 ID
-  "label": "注册某网站"        # 可选: 别名标签
-}
-
-# 响应
-{
-  "success": true,
-  "data": {
-    "email": "xyz123@icloud.com",
-    "label": "注册某网站",
-    "created_at": "2024-01-15T10:30:00Z",
-    "account_id": "acc_1"
-  }
-}
-```
-
-#### 读取邮件
+### 创建别名
 
 ```bash
-GET /api/inbox?account_id=acc_1&alias=xyz123@icloud.com&limit=20&days=7
-
-# 参数说明:
-#   account_id - 必填: 账号 ID
-#   alias      - 可选: 只读取发到该别名的邮件
-#   limit      - 可选: 返回邮件数量 (默认 20)
-#   days       - 可选: 查找最近几天的邮件 (默认 7,仅 IMAP 模式)
-
-# 响应
-{
-  "success": true,
-  "data": {
-    "account_id": "acc_1",
-    "alias": "xyz123@icloud.com",
-    "count": 2,
-    "method": "imap",
-    "messages": [
-      {
-        "id": "1042",
-        "from": "noreply@example.com",
-        "to": "xyz123@icloud.com",
-        "subject": "欢迎注册",
-        "preview": "感谢您的注册...",
-        "date": "2026-07-09T14:32:10+08:00"
-      }
-    ]
-  }
-}
-
-# 读取方式 (自动选择):
-#   method: "imap"    — 通过 App Password 认证 (优先)
-#   method: "web_api" — 通过 Cookie 认证,无需 App Password (回退)
+curl -b jar.txt -X POST http://localhost:8081/api/create \
+  -H "Content-Type: application/json" -H "X-CSRF-Token: $CSRF" \
+  -d '{"account_id":"acc_1","label":"注册某网站"}'
+# → data.email 即新生成的隐私邮箱
 ```
 
-### 账号管理接口
-
-#### 列出所有账号
+### 取件
 
 ```bash
-GET /api/accounts
+# 列出邮件(可按别名与天数筛选)
+curl -b jar.txt "http://localhost:8081/api/inbox?account_id=acc_1&alias=xyz123@icloud.com&limit=20&days=7"
 
-# 响应
-{
-  "success": true,
-  "data": [
-    {"id": "acc_1", "name": "主号"},
-    {"id": "acc_2", "name": "副号"}
-  ]
-}
+# 读正文 / 删除
+curl -b jar.txt "http://localhost:8081/api/inbox/1042?account_id=acc_1"
+curl -b jar.txt -X DELETE "http://localhost:8081/api/inbox/1042?account_id=acc_1" -H "X-CSRF-Token: $CSRF"
 ```
 
-#### 添加账号
+响应中的 `method` 字段标识数据来源：`imap`(App 专用密码,支持按收件人与天数过滤) 或 `web_api`(Cookie 回退)。注意详情与删除仅支持 IMAP 路径,详见 API.md 的「已知限制」。
 
-**简化版（cookies 可选）:**
+### 辅助接口
 
-```bash
-POST /api/accounts
+| 接口 | 用途 |
+|---|---|
+| `POST /api/auth/login`、`GET /api/auth/session`、`POST /api/auth/logout` | 管理员会话与 CSRF |
+| `GET /api/accounts`、`POST /api/accounts`、`PATCH/DELETE /api/accounts/:id` | 账号增删改查 |
+| `PUT /api/accounts/:id/cookies`、`POST /api/accounts/:id/password`、`POST /api/accounts/:id/login` | 写入 Cookie / App 专用密码 / 密码登录 |
+| `PUT /api/accounts/:id/mailbox`、`PUT /api/accounts/:id/proxy` | 接入外部收件邮箱 / 设置代理 |
+| `GET /api/aliases`、`POST /api/aliases/:id/deactivate`、`POST /api/aliases/:id/reactivate`、`DELETE /api/aliases/:id` | 别名管理 |
+| `POST /api/reload` | 重新加载 accounts.json |
 
-# 请求体
-{
-  "name": "新账号",
-  "host": "icloud.com",           # 可选
-  "proxy": "http://..."           # 可选
-}
-
-# 响应 - 状态为 pending,需登录
-{
-  "success": true,
-  "data": {
-    "id": "acc_xxx",
-    "name": "新账号",
-    "status": "pending"
-  }
-}
-```
-
-**完整版（带 Cookie）:**
-
-```bash
-POST /api/accounts
-
-# 请求体
-{
-  "name": "新账号",
-  "cookies": "{\"x-apple-session-token\":\"token_value\"}",  # JSON 或 Header 格式
-  "host": "icloud.com",           # 可选
-  "proxy": "http://..."           # 可选
-}
-
-# 响应
-{
-  "success": true,
-  "data": {
-    "id": "acc_3",
-    "name": "新账号",
-    "status": "active"
-  }
-}
-```
-
-#### 账号登录（获取 Cookie）
-
-```bash
-POST /api/accounts/:id/login
-
-# 请求体
-{
-  "password": "用户的常规iCloud密码",  # 不是 App Password
-  "otp_code": "123456"                  # 可选,2FA 验证码
-}
-
-# 响应
-{
-  "success": true,
-  "data": {
-    "id": "acc_1",
-    "cookies": {
-      "x-apple-session-token": "...",
-      "X-APPLE-WEBAUTH-TOKEN": "..."
-    }
-  }
-}
-```
-
-#### 删除账号
-
-```bash
-DELETE /api/accounts/:id
-
-# 响应
-{
-  "success": true,
-  "data": {"id": "acc_3"}
-}
-```
-
-#### 设置 App Password
-
-```bash
-POST /api/accounts/:id/password
-
-# 请求体
-{
-  "icloud_email": "your_email@icloud.com",
-  "app_password": "xxxx-xxxx-xxxx-xxxx"
-}
-
-# 响应
-{
-  "success": true,
-  "data": {
-    "id": "acc_1",
-    "icloud_email": "your_email@icloud.com"
-  }
-}
-```
-
-### 别名管理接口
-
-#### 列出所有别名
-
-```bash
-GET /api/aliases?account_id=acc_1
-
-# 响应
-{
-  "success": true,
-  "data": {
-    "account_id": "acc_1",
-    "count": 15,
-    "aliases": [
-      {
-        "email": "xyz123@icloud.com",
-        "label": "注册某网站",
-        "created_at": "2024-01-15T10:30:00Z"
-      }
-    ]
-  }
-}
-```
-
-#### 停用别名
-
-```bash
-POST /api/aliases/:id/deactivate
-
-# 请求体
-{
-  "account_id": "acc_1"
-}
-
-# 响应
-{
-  "success": true,
-  "data": {
-    "anonymous_id": "abc123",
-    "success": true
-  }
-}
-```
-
-#### 激活别名
-
-```bash
-POST /api/aliases/:id/reactivate
-
-# 请求体
-{
-  "account_id": "acc_1"
-}
-
-# 响应
-{
-  "success": true,
-  "data": {
-    "anonymous_id": "abc123",
-    "success": true
-  }
-}
-```
-
-#### 删除别名
-
-```bash
-DELETE /api/aliases/:id
-
-# 请求体
-{
-  "account_id": "acc_1"
-}
-
-# 响应
-{
-  "success": true,
-  "data": {
-    "anonymous_id": "abc123"
-  }
-}
-```
-
+除登录与会话查询外,所有 `/api/*` 都需要 `hme_session` 会话;非 `GET` 请求还需 `X-CSRF-Token`。响应统一为 `{success, data}` 或 `{success, code, message}`。
 ## 认证方式
 
-### 方式一: Cookie 认证 (推荐,功能最完整)
+三种凭据按需选择,获取步骤见 [API.md](API.md) 第 9 节:
 
-Cookie 认证可实现所有功能:创建别名、读取邮件、管理别名。
+- **Cookie**(创建别名必需) — 浏览器登录 [icloud.com](https://www.icloud.com) 或 [icloud.com.cn](https://www.icloud.com.cn),导出 Cookie 后粘贴到「账号设置 → 更新 Cookie」,有效期约 24 小时。关键字段 `X-APPLE-WEBAUTH-TOKEN`、`X-APPLE-WEBAUTH-USER`、`X-APPLE-WEBAUTH-HSA-TRUST`、`X-APPLE-DS-WEB-SESSION-TOKEN`
+- **App 专用密码**(取件首选) — 在 [appleid.apple.com](https://appleid.apple.com) 生成,走 IMAP,支持按收件人搜索与时间范围过滤
+- **外部收件邮箱**(备选) — 接入 QQ / Gmail / Outlook 的 IMAP,无需暴露 iCloud 凭据
 
-**适用范围:**
-- 创建/停用/激活/删除 HME 别名 ✅
-- 读取邮件 (通过 iCloud Web API,无需 App Password) ✅
-
-**获取 Cookie:**
-
-1. 使用浏览器登录 [icloud.com](https://www.icloud.com) 或 [icloud.com.cn](https://www.icloud.com.cn) (国区)
-2. 打开浏览器开发者工具 (F12)
-3. 进入 Application → Cookies
-4. 导出全部 Cookie 为 `{"key":"value"}` 格式的 JSON
-
-**关键 Cookie (必需):**
-- `X-APPLE-WEBAUTH-TOKEN` — 认证 token
-- `X-APPLE-WEBAUTH-USER` — 含 dsid (`v=1:s=1:d=22789132008`)
-- `X-APPLE-WEBAUTH-HSA-TRUST` — 设备信任 token
-- `X-APPLE-DS-WEB-SESSION-TOKEN` — 会话 token
-
-**注意:** 导出的 Cookie 值不要包含多余的引号或转义字符。
-
-### 方式二: App Password 认证 (IMAP,优先读邮件)
-
-App Password 用于 IMAP 读取邮件,是邮件读取的优先路径 (支持服务端按收件人搜索)。
-
-**生成 App Password:**
-
-1. 登录 [appleid.apple.com](https://appleid.apple.com)
-2. 进入 "登录和安全" → "App 专用密码"
-3. 生成新密码,用于此工具
-
-### 邮件读取双路径
-
-`GET /api/inbox` 自动选择读取方式:
-
-1. **优先: IMAP (App Password)** — 设置了 App Password 时使用,支持服务端按收件人 (`TO`) 搜索
-2. **回退: Web API (Cookie)** — 无 App Password 或 IMAP 失败时,通过 `mccgateway` 端点读取,本地按别名过滤
-
-响应中包含 `"method": "web_api"` 或 `"method": "imap"` 字段,标识实际使用的读取方式。
-
+取件时服务端按 `外部收件邮箱 → App 专用密码(IMAP) → Cookie(Web API)` 的顺序选择可用凭据。
 ## 项目架构
 
 ```
 icloud-hme/
-├── main.go                 # 入口: 读取安全配置、加载账号、启动服务
-├── web/                    # 前端工程 (React + TypeScript + Vite)
-│   └── src/                #   管理界面源码
+├── main.go                    # 入口: 读取安全配置、加载账号、启动服务
+├── API.md                     # HTTP API 契约文档
+├── web/                       # 前端工程 (React 19 + TypeScript + Vite + Ant Design)
+│   └── src/
+│       ├── main.tsx           #   入口: 主题 token、中文语言包、AntD App 上下文
+│       ├── App.tsx            #   路由与登录态保护
+│       ├── api/               #   契约类型、fetch 封装、资源读取 hooks
+│       ├── components/        #   布局骨架与账号/凭据弹窗
+│       ├── pages/             #   创建别名、取件、账号设置、登录
+│       └── test/              #   vitest + msw 测试基础设施
 ├── accounts.json           # 账号配置文件 (自动生成)
 ├── go.mod
 └── internal/
@@ -493,6 +234,7 @@ icloud-hme/
 
 - **Go 1.26+** / **Gin** — HTTP 框架
 - **React 19 + TypeScript + Vite 8** — 管理界面
+- **Ant Design 6** — UI 组件库（中文语言包 + 主题 token 定制，替代自研弹窗/提示/表格样式）
 - **go-imap** — IMAP 协议实现
 - **tls-client** — TLS 指纹模拟 (绕过 iCloud 反爬)
 
@@ -512,11 +254,30 @@ icloud-hme/
 
 ### Q: 支持同时管理多个 iCloud 账号吗?
 
-**A:** 支持，在 `accounts.json` 中配置多个账号即可，每个账号有独立的 `id`。
+**A:** 支持，在 `accounts.json` 中配置多个账号即可，每个账号有独立的 `id`；界面右上角的账号下拉框用于切换。
+
+### Q: 点开邮件提示"account_id 或邮件 ID 无效"?
+
+**A:** 该账号当前走的是 Cookie 回退路径（`method: "web_api"`），它返回的邮件 ID 不是 IMAP UID，无法用于读取正文或删除。给账号配置 App 专用密码或外部收件邮箱即可获得完整取件能力，详见 [API.md](API.md) 的「已知限制」。
 
 ## 开发指南
 
 ### 本地开发
+
+一键启动前后端（推荐）：
+
+```bash
+./dev.sh                  # 后端 127.0.0.1:8081 + 前端 127.0.0.1:5173
+./dev.sh --smoke          # 启动就绪后自动跑一遍浏览器冒烟测试
+./dev.sh -b 9000 -f 4000  # 自定义端口
+./dev.sh --backend-only   # 只起后端(界面走内嵌构建产物)
+./dev.sh --stop           # 停止残留的后端/前端进程(上次异常退出时可先执行)
+./dev.sh -h               # 全部选项
+```
+
+首次运行会自动 `npm ci` 并编译后端；就绪后打印访问地址与操作提示，`Ctrl-C` 同时停止两端；日志分别落在 `build/dev-logs/{api,web}.log`。默认管理员密码 `dev-admin-pass-2026`，服务只监听回环地址，可用 `-p` 或 `ICLOUD_HME_ADMIN_PASSWORD` 覆盖。
+
+手动分步启动：
 
 ```bash
 # 前端开发模式 (vite dev server, /api 代理到 :8081)
@@ -537,6 +298,86 @@ npm --prefix web run check
 GOOS=linux GOARCH=amd64 go build -o icloud-hme .
 GOOS=windows GOARCH=amd64 go build -o icloud-hme.exe .
 ```
+
+### 测试
+
+```bash
+# Go:单元测试 + 静态检查(与 CI 一致,约 1 秒)
+go test ./internal/... .
+go vet ./internal/... .
+
+# 前端:jsdom 单测(lint + 23 个用例 + 构建)
+npm --prefix web run check
+
+# 前端:浏览器冒烟(需先启动服务,详见 web/README.md)
+export ICLOUD_HME_ADMIN_PASSWORD='your-strong-password'
+./build/icloud-hme &            # 或 go run main.go -debug
+cd web && npx playwright install chromium   # 首次安装浏览器
+ICLOUD_HME_ADMIN_PASSWORD='your-strong-password' npm --prefix web run e2e
+```
+
+冒烟脚本会用真实 Chromium 打开界面，跑通「登录 → 创建别名 → 取件」，并核对 Ant Design 样式未被 CSP 拦截。iCloud 侧数据由脚本伪造，不需要真实账号。
+
+### 自动建满别名
+
+界面「创建别名」页右上角的 **自动建满** 按钮，或在服务运行期间直接调接口：
+
+```bash
+# 目标 700(默认),每 20 秒尝试一次,命中限流冷却 30 分钟后继续
+curl -b jar.txt -X POST http://localhost:8081/api/autocreate/start \
+  -H 'Content-Type: application/json' -H "X-CSRF-Token: $CSRF" \
+  -d '{"account_id":"acc_1"}'
+
+curl -b jar.txt http://localhost:8081/api/autocreate   # 查看进度与日志
+curl -b jar.txt -X POST http://localhost:8081/api/autocreate/stop -H "X-CSRF-Token: $CSRF"
+```
+
+任务在后台线程里跑，按下面的规则自动收敛：
+
+- **可以多账号并行**：iCloud 的创建限流按账号计算，所以 N 个账号各有独立节流窗口；同一个账号内并发创建没有收益（配额是账号级的）
+- **创建间隔随机**：每创建一个别名后随机等待 20–40 秒（可配）再继续，避免固定节拍；首个别名立即创建
+- 启动时并发检查每个账号的初始配额（当前别名总数），已达目标的账号直接跳过，不会空转
+- 达到 `target`（默认 700）→ `completed`
+- iCloud 报告别名总量已达上限 → `completed`（重试无意义）
+- 命中速率限制 → `cooling`，等 `cooldown_seconds`（默认 30 分钟）后重新校准并继续
+- 其它错误连续 `max_failures`（默认 5）次 → `stopped`，等待人工检查
+
+同一时间只允许一个任务（重复启动返回 `409 TASK_RUNNING`），任务状态存在内存里，**服务重启后不会自动恢复**。完整参数与状态字段见 [API.md](API.md) 的「自动建满别名」。
+
+### 检测别名创建密度
+
+Apple 没有公开别名的创建速率与总量阈值，`cmd/hme-probe` 用来把实际限制测出来：
+
+```bash
+# 只读统计:从现有别名的创建时间算出各时间窗口内的峰值,不产生任何写入
+go run ./cmd/hme-probe -data ./data -analyze
+go run ./cmd/hme-probe -data ./data -analyze -windows 10s,1h -capacity 700
+
+# 主动探测:按间隔连续创建,直到触发 iCloud 限制
+go run ./cmd/hme-probe -data ./data -account acc_xxx -probe -count 20 -interval 3s
+go run ./cmd/hme-probe -data ./data -probe -count 5 -interval 2s -cleanup
+```
+
+`-analyze` 用滑动窗口统计历史峰值，默认窗口为 `1m,5m,30m,1h,24h`（本地时区显示，窗口是闭区间：首尾间隔恰好等于窗口也算同一窗口），并给出已用/剩余额度参考：
+
+```
+别名总数: 183
+时间范围: 2026-05-04 08:00:00 → 2026-09-16 20:10:00
+
+窗口       最大创建数    出现区间(窗口内最早一次 → 最晚一次)
+30m      5        2026-05-04 21:00:00 → 2026-05-04 21:24:00
+
+额度参考: 已用 183/700,剩余约 517
+(上限 700 为社区实测经验值,非 Apple 官方数字;你的账号可能不同,可用 -capacity 调整)
+```
+
+`-probe` 会**真实创建别名**，用于测当前节流窗口还剩多少余额：
+
+- 报错命中 `429` / `too many` / `rate limit` / `quota` / `exceed` 等特征时立即停止，避免加重限流，并回显原始错误
+- 未触发限制时提示用更大的 `-count`（硬上限 50）或更短的 `-interval` 逼近上限
+- 结果按 1m / 5m / 30m 窗口汇总成功数，`-cleanup` 可删除本次创建的别名
+
+社区实测经验（非官方数字，仅作起步参考）：**约每 30 分钟可创建 5 × iCloud 家庭成员数个别名，账号总量上限约 700 个**。所以先用 `-analyze` 看 30 分钟窗口的历史峰值，再用 `-probe` 在当前窗口试探余额，两者结合就能判断账号的实际节流点。
 
 ### 发布
 
@@ -565,17 +406,16 @@ MIT License
 
 ## English
 
-A local management tool for Apple iCloud Hide My Email (HME) aliases, supporting creation, listing, and email reading through reverse-engineered iCloud Web API and IMAP protocol. Ships with a built-in Chinese management UI (React SPA embedded in the single binary).
+A local management tool for Apple iCloud Hide My Email (HME) aliases, supporting creation, listing, and email reading through reverse-engineered iCloud Web API and IMAP protocol. Ships with a built-in Chinese management UI (React 19 + Ant Design SPA embedded in the single binary), focused on two jobs: **creating aliases** and **reading mail**.
 
 ### Features
 
-- Built-in management UI at `http://localhost:8081`
-- Create HME aliases automatically
-- List all aliases for an account
-- Read emails sent to HME aliases via IMAP or Web API
+- Built-in UI at `http://localhost:8081` — three pages: aliases, inbox, account settings
+- Create HME aliases (with labels, copy, deactivate/reactivate/delete)
+- Read emails sent to aliases, filter by alias and time range, open the plain-text body, delete
 - Manage multiple iCloud accounts
-- Dual authentication: Cookie and App Password
-- Security: single-admin session, CSRF checks, login rate limiting, redacted API responses
+- Dual-path mail reading: IMAP (App Password) first, Web API (Cookie) fallback
+- Security: single-admin session, CSRF checks, login rate limiting, redacted API responses, strict CSP
 
 ### Quick Start
 

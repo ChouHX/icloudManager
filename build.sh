@@ -19,7 +19,7 @@ echo "==> 构建前端(输出到 internal/webui/dist)"
 npm --prefix web run build
 
 echo "==> 运行 Go 测试"
-go test ./internal/... .
+go test ./...
 
 echo "==> 清理旧的构建文件"
 rm -rf "$OUTPUT_DIR"

@@ -1,0 +1,44 @@
+# iCloud Hide My Email 本地管理工具
+#
+# 用法:
+#   cp .env.example .env   # 至少设置 ICLOUD_HME_ADMIN_PASSWORD
+#   docker compose up -d --build
+#   docker compose logs -f
+#
+# 默认从当前目录构建镜像;若想直接用 CI 产出的镜像,把 build 段换成:
+#   image: ghcr.io/chouhx/icloudmanager:latest
+
+services:
+  icloud-hme:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # image: ghcr.io/chouhx/icloudmanager:latest
+    container_name: icloud-hme
+    restart: unless-stopped
+
+    ports:
+      # 只在本机访问可改成 "127.0.0.1:${ICLOUD_HME_PORT:-8081}:8081"
+      - "${ICLOUD_HME_PORT:-8081}:8081"
+
+    environment:
+      # 必填:未在 .env 中设置时 compose 会直接报错,避免用默认密码启动
+      ICLOUD_HME_ADMIN_PASSWORD: ${ICLOUD_HME_ADMIN_PASSWORD:?请在 .env 中设置管理员密码(至少 8 位)}
+      ICLOUD_HME_SESSION_TTL: ${ICLOUD_HME_SESSION_TTL:-12h}
+      ICLOUD_HME_SECURE_COOKIE: ${ICLOUD_HME_SECURE_COOKIE:-false}
+      ICLOUD_HME_IMAP_POOL_SIZE: ${ICLOUD_HME_IMAP_POOL_SIZE:-10}
+      TZ: ${TZ:-Asia/Shanghai}
+
+    volumes:
+      # accounts.json 与运行数据都保存在这里,删容器不丢配置
+      - ./data:/app/data
+
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8081/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+    security_opt:
+      - no-new-privileges:true

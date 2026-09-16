@@ -1,0 +1,19 @@
+# 构建上下文排除项:镜像内由各自阶段重新生成,不需要从宿主机带入
+
+# 版本控制与 CI
+.git
+.github
+
+# 构建产物与运行期数据
+build/
+data/
+*.log
+
+# 前端依赖与产物(镜像内 npm ci 重新安装;dist 由 web-builder 阶段产出)
+web/node_modules/
+web/dist/
+internal/webui/dist/*
+
+# 本地开发脚本产物
+.env
+.env.local

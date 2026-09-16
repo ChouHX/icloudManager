@@ -27,3 +27,6 @@ js
 accounts.json
 *.exe
 build/
+# 本地构建产物
+/icloud-hme
+/hme-probe

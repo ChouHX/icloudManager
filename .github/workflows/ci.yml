@@ -59,10 +59,52 @@ jobs:
           path: internal/webui/dist/
 
       - name: Test
-        run: go test -race ./internal/... .
+        run: go test -race ./...
 
       - name: Vet
-        run: go vet ./internal/... .
+        run: go vet ./...
 
       - name: Build
-        run: go build ./internal/... .
+        run: go build ./...
+
+  e2e:
+    name: Web e2e (browser smoke)
+    runs-on: ubuntu-latest
+    needs: go
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm --prefix web ci
+
+      - name: Build frontend
+        run: npm --prefix web run build
+
+      - name: Build server binary
+        run: go build -o /tmp/icloud-hme .
+
+      - name: Install Chromium
+        run: cd web && npx playwright install --with-deps chromium
+
+      - name: Start server and run browser smoke test
+        env:
+          ICLOUD_HME_ADMIN_PASSWORD: e2e-admin-pass-2026
+        run: |
+          mkdir -p /tmp/hme-data
+          /tmp/icloud-hme -addr 127.0.0.1:8081 -data /tmp/hme-data &
+          for _ in $(seq 1 20); do
+            curl -sf -o /dev/null http://127.0.0.1:8081/ && break
+            sleep 0.5
+          done
+          npm --prefix web run e2e
