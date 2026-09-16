@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
@@ -58,6 +59,41 @@ describe('AutoCreatePanel', () => {
     expect(screen.getByText(/\[主号\] 等待 27s 后继续/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /停止任务/ })).toBeInTheDocument()
     expect(onProgress).toHaveBeenCalled()
+  })
+
+  // 回归 React error #185:父组件传内联箭头函数时,曾因依赖变化触发无限刷新
+  it('父组件传入不稳定回调时不会陷入无限渲染', async () => {
+    const user = userEvent.setup()
+    let renders = 0
+
+    function Harness() {
+      renders++
+      const [, setTick] = useState(0)
+      return (
+        <AutoCreatePanel
+          open
+          accountId={ACCOUNT.id}
+          accounts={[ACCOUNT]}
+          onClose={() => {}}
+          // 故意每次渲染都传入新函数,并在回调里更新父组件状态
+          // (对应真实场景:onProgress 会调用 reload() 触发刷新)
+          onProgress={() => {
+            renders++
+            setTick((value) => value + 1)
+          }}
+        />
+      )
+    }
+
+    renderPage(<Harness />, { route: '/aliases', path: '/aliases' })
+    await screen.findByText('未运行')
+    await user.click(screen.getByRole('button', { name: /启\s*动/ }))
+    await screen.findByRole('button', { name: /停止任务/ })
+    // 给足时间让潜在循环暴露。修复前这里会持续自我触发,
+    // 300ms 内即可渲染数十次;正常情况只有个位数。
+    await new Promise((resolve) => setTimeout(resolve, 500))
+
+    expect(renders).toBeLessThan(20)
   })
 
   it('运行中可停止任务', async () => {

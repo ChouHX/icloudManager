@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import {
   Alert,
@@ -66,6 +66,13 @@ export default function AliasesPage() {
 
   const aliasesUrl = accountId ? `/api/aliases?account_id=${encodeURIComponent(accountId)}` : null
   const { data, loading, error, reload } = useFetch<AliasListResult>(aliasesUrl)
+
+  // 面板回调必须保持稳定引用:它在创建数增加时被调用,
+  // 内联箭头函数每次渲染都会产生新引用,会触发无限刷新(React error #185)。
+  const handleAutoProgress = useCallback(() => {
+    reload()
+    reloadAccounts()
+  }, [reload, reloadAccounts])
 
   const rows = useMemo(() => {
     const keyword = search.trim().toLowerCase()
@@ -315,10 +322,7 @@ export default function AliasesPage() {
         accountId={accountId}
         accounts={accounts}
         onClose={() => setAutoOpen(false)}
-        onProgress={() => {
-          reload()
-          reloadAccounts()
-        }}
+        onProgress={handleAutoProgress}
       />
 
       <Modal

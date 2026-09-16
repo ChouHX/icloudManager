@@ -35,6 +35,28 @@ const ALIASES = [
   { email: 'beta@icloud.com', anonymousId: 'anon_2', label: '订阅', active: false, createdAt: '2026-08-01T10:00:00+08:00' },
 ]
 
+// 自动建满任务运行中的状态(用于验证面板刷新不会造成渲染循环)
+const AUTO_RUNNING = {
+  running: true, phase: 'running', target: 700, total: 12, created: 5, failed: 0,
+  interval_seconds: 20, interval_max_seconds: 40, cooldown_seconds: 1800,
+  label_prefix: 'auto', max_failures: 5, max_parallel: 10,
+  started_at: '2026-09-16T21:00:00+08:00',
+  next_run_at: '2026-09-16T21:00:20+08:00',
+  attempting: false,
+  last_email: 'auto5@icloud.com',
+  accounts: [
+    {
+      account_id: 'acc_1', name: '主号', phase: 'running', target: 700, total: 12, remaining: 688,
+      created: 5, failed: 0, consecutive_failures: 0, capacity_checked: true,
+      attempting: false, next_run_at: '2026-09-16T21:00:20+08:00', last_email: 'auto5@icloud.com',
+    },
+  ],
+  logs: [
+    { time: '2026-09-16T21:00:00+08:00', level: 'info', message: '任务启动:1 个账号,目标总数各 700,创建后随机等待 20-40s,冷却 1800s,并发上限 10' },
+    { time: '2026-09-16T21:00:20+08:00', level: 'success', message: '[主号] 创建成功 auto5@icloud.com(总计 12/700)' },
+  ],
+}
+
 const MESSAGE = {
   id: '1042', from: 'GitHub <noreply@github.com>', to: 'alpha@icloud.com',
   subject: '请验证你的邮箱', date: '2026-07-09T14:32:10+08:00',
@@ -184,6 +206,16 @@ async function main() {
     check('面板支持多选账号', (await panel.getByLabel('账号（可多选，并行创建）').count()) > 0)
     check('面板展示任务参数', await panel.getByLabel('间隔最小（秒）').inputValue().then((v) => v === '20'))
     check('面板支持随机间隔上限', await panel.getByLabel('间隔最大（秒）').inputValue().then((v) => v === '40'))
+
+    // 启动任务后面板会因进度刷新触发外部回调,这里验证不会陷入无限渲染(React error #185)
+    await page.route('**/api/autocreate/start', (route) => route.fulfill(json(AUTO_RUNNING)))
+    await panel.getByRole('button', { name: /启\s*动/ }).click()
+    await panel.getByRole('button', { name: /停止任务/ }).waitFor()
+    await page.waitForTimeout(1200)
+    const loopErrors = consoleErrors.filter((text) => /Maximum update depth|#185/.test(text)).length
+    check('面板启动后无渲染循环', loopErrors === 0, consoleErrors.join(' | '))
+    check('面板显示账号进度', await panel.getByText('12 / 700（还需 688）').isVisible())
+
     await page.locator('.ant-drawer-close').last().click()
     await page.waitForTimeout(400)
 

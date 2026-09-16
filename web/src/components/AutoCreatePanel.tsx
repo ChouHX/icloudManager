@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert,
   App as AntdApp,
@@ -80,10 +80,22 @@ export default function AutoCreatePanel({ open, accountId, accounts, onClose, on
     }
   }, [open, version])
 
-  // 已创建数量变化时刷新外部列表
+  // 回调用 ref 持有:父组件即便传入不稳定引用,也不会因为依赖变化反复触发刷新
+  // (ref 只在 effect 中更新,渲染期间读写 ref 在并发渲染下不安全)
+  const onProgressRef = useRef(onProgress)
   useEffect(() => {
-    if (status?.created) onProgress()
-  }, [status?.created, onProgress])
+    onProgressRef.current = onProgress
+  }, [onProgress])
+
+  // 只在"创建数增加"时通知外部刷新,且 effect 只依赖 created
+  const lastCreatedRef = useRef(0)
+  useEffect(() => {
+    const created = status?.created ?? 0
+    if (created > lastCreatedRef.current) {
+      lastCreatedRef.current = created
+      onProgressRef.current()
+    }
+  }, [status?.created])
 
   const accountOptions = useMemo(
     () => accounts.map((account) => ({ value: account.id, label: account.name })),
