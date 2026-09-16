@@ -1,315 +1,319 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
-import { request, ApiError } from '../api/client'
-import type { AccountSummary, Alias, FullMessage, InboxResult, InboxMessage } from '../api/types'
-import AsyncState from '../components/AsyncState'
-import Dialog from '../components/Dialog'
-import ConfirmDialog from '../components/ConfirmDialog'
-import { useToast } from '../components/ToastProvider'
-import { IconKey, IconMail, IconTrash } from '../components/icons'
+import { useEffect, useMemo, useState } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
+import {
+  Alert,
+  App as AntdApp,
+  Button,
+  Card,
+  Descriptions,
+  Drawer,
+  Popconfirm,
+  Result,
+  Select,
+  Space,
+  Table,
+  Tag,
+  Typography,
+} from 'antd'
+import type { TableProps } from 'antd'
+import {
+  CloudServerOutlined,
+  DeleteOutlined,
+  KeyOutlined,
+  MailOutlined,
+  ReloadOutlined,
+} from '@ant-design/icons'
+import { ApiError, request } from '../api/client'
+import { useAccounts, useFetch } from '../api/hooks'
+import type { AliasListResult, FullMessage, InboxMessage, InboxResult } from '../api/types'
+import MailBody from '../components/MailBody'
+import { formatDateTime } from '../utils/format'
 
-function formatDate(raw: string): string {
-  const d = new Date(raw)
-  if (Number.isNaN(d.getTime())) return raw
-  return new Intl.DateTimeFormat('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(d)
-}
+const DAY_OPTIONS = [
+  { value: 1, label: '近 1 天' },
+  { value: 3, label: '近 3 天' },
+  { value: 7, label: '近 7 天' },
+  { value: 30, label: '近 30 天' },
+  { value: 90, label: '近 90 天' },
+]
+
+const LIMIT_OPTIONS = [
+  { value: 20, label: '20 封' },
+  { value: 50, label: '50 封' },
+  { value: 100, label: '100 封' },
+]
 
 export default function InboxPage() {
-  const [accounts, setAccounts] = useState<AccountSummary[]>([])
-  const [aliases, setAliases] = useState<Alias[]>([])
-  const [accountId, setAccountId] = useState('')
-  const [alias, setAlias] = useState('')
-  const [limit, setLimit] = useState(20)
-  const [days, setDays] = useState(7)
+  const { message } = AntdApp.useApp()
+  const { accounts, loading: accountsLoading } = useAccounts()
+  const [searchParams, setSearchParams] = useSearchParams()
 
-  const [result, setResult] = useState<InboxResult | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [retryKey, setRetryKey] = useState(0)
+  const [days, setDays] = useState(7)
+  const [limit, setLimit] = useState(20)
   const [detail, setDetail] = useState<FullMessage | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
-  const [deleteFor, setDeleteFor] = useState<InboxMessage | null>(null)
   const [deleting, setDeleting] = useState(false)
 
-  const [searchParams, setSearchParams] = useSearchParams()
-  const abortRef = useRef<AbortController | null>(null)
-  const { show } = useToast()
+  const queryAccount = searchParams.get('account_id') ?? ''
+  const queryAlias = searchParams.get('alias') ?? ''
 
-  async function openMessage(message: InboxMessage) {
+  const accountId = useMemo(() => {
+    if (accounts.length === 0) return ''
+    return accounts.some((a) => a.id === queryAccount) ? queryAccount : accounts[0].id
+  }, [accounts, queryAccount])
+
+  // 别名筛选直接来自 URL,不做本地镜像状态
+  const alias = queryAlias
+
+  // URL 是账号/别名筛选的唯一真相来源
+  useEffect(() => {
+    const next: Record<string, string> = {}
+    if (accountId) next.account_id = accountId
+    if (queryAlias) next.alias = queryAlias
+    if (next.account_id !== queryAccount || next.alias !== queryAlias) {
+      setSearchParams(next, { replace: true })
+    }
+  }, [accountId, queryAccount, queryAlias, setSearchParams])
+
+  const aliasesUrl = accountId ? `/api/aliases?account_id=${encodeURIComponent(accountId)}` : null
+  const { data: aliasData } = useFetch<AliasListResult>(aliasesUrl)
+
+  const inboxUrl = useMemo(() => {
+    if (!accountId) return null
+    const params = new URLSearchParams({ account_id: accountId, limit: String(limit), days: String(days) })
+    if (alias) params.set('alias', alias)
+    return `/api/inbox?${params.toString()}`
+  }, [accountId, alias, limit, days])
+
+  const { data, loading, error, reload } = useFetch<InboxResult>(inboxUrl)
+
+  async function openMessage(record: InboxMessage) {
     setDetailLoading(true)
     try {
-      const data = await request<FullMessage>(`/api/inbox/${encodeURIComponent(message.id)}?account_id=${encodeURIComponent(accountId)}`)
-      setDetail(data)
+      // sanitize=1:额外取一份清理后的 HTML,界面用这份渲染(原始版仍在 body_html 里)
+      const full = await request<FullMessage>(
+        `/api/inbox/${encodeURIComponent(record.id)}?account_id=${encodeURIComponent(accountId)}&sanitize=1`,
+      )
+      setDetail(full)
     } catch (err) {
-      show(err instanceof ApiError ? err.message : '读取邮件详情失败')
+      message.error(err instanceof ApiError ? err.message : '读取邮件详情失败')
     } finally {
       setDetailLoading(false)
     }
   }
 
-  async function deleteMessage() {
-    if (!deleteFor) return
+  async function deleteMessage(target: InboxMessage | FullMessage) {
     setDeleting(true)
     try {
-      await request(`/api/inbox/${encodeURIComponent(deleteFor.id)}?account_id=${encodeURIComponent(accountId)}`, { method: 'DELETE' })
-      setDeleteFor(null)
+      await request(
+        `/api/inbox/${encodeURIComponent(target.id)}?account_id=${encodeURIComponent(accountId)}`,
+        { method: 'DELETE' },
+      )
       setDetail(null)
-      show('邮件已删除')
-      setRetryKey((key) => key + 1)
+      message.success('邮件已删除')
+      reload()
     } catch (err) {
-      show(err instanceof ApiError ? err.message : '删除邮件失败')
+      message.error(err instanceof ApiError ? err.message : '删除邮件失败')
     } finally {
       setDeleting(false)
     }
   }
 
-  // 加载账号列表并初始化筛选状态(只保存 account_id/alias/limit/days)
-  useEffect(() => {
-    let cancelled = false
-    request<AccountSummary[]>('/api/accounts')
-      .then((data) => {
-        if (cancelled) return
-        setAccounts(data)
-        const queryId = searchParams.get('account_id')
-        const valid = data.find((a) => a.id === queryId)
-        const target = valid ? valid.id : data[0]?.id ?? ''
-        setAccountId(target)
-        if (target) {
-          const next: Record<string, string> = { account_id: target }
-          const qAlias = searchParams.get('alias')
-          if (qAlias) {
-            setAlias(qAlias)
-            next.alias = qAlias
-          }
-          const qLimit = searchParams.get('limit')
-          if (qLimit) next.limit = qLimit
-          const qDays = searchParams.get('days')
-          if (qDays) next.days = qDays
-          setSearchParams(next, { replace: true })
+  function updateAlias(next: string) {
+    const params: Record<string, string> = { account_id: accountId }
+    if (next) params.alias = next
+    setSearchParams(params, { replace: true })
+  }
+
+  const columns: TableProps<InboxMessage>['columns'] = [
+    {
+      title: '主题',
+      dataIndex: 'subject',
+      render: (subject: string, record) => (
+        <Button type="link" size="small" style={{ padding: 0 }} onClick={() => void openMessage(record)}>
+          {subject || '（无主题）'}
+        </Button>
+      ),
+    },
+    {
+      title: '发件人',
+      dataIndex: 'from',
+      width: 220,
+      ellipsis: true,
+    },
+    {
+      title: '收件别名',
+      dataIndex: 'to',
+      width: 220,
+      ellipsis: true,
+    },
+    {
+      title: '时间',
+      dataIndex: 'date',
+      width: 170,
+      render: (value: string) => formatDateTime(value),
+    },
+    {
+      title: '摘要',
+      dataIndex: 'preview',
+      ellipsis: true,
+      render: (preview: string) => preview || '—',
+    },
+    {
+      title: '操作',
+      key: 'actions',
+      width: 100,
+      render: (_, record) => (
+        <Popconfirm
+          title="删除该邮件？"
+          description="邮件会从收件箱中永久删除。"
+          okText="删除"
+          okButtonProps={{ danger: true }}
+          cancelText="取消"
+          onConfirm={() => void deleteMessage(record)}
+        >
+          <Button type="link" size="small" danger icon={<DeleteOutlined />} loading={deleting}>
+            删除
+          </Button>
+        </Popconfirm>
+      ),
+    },
+  ]
+
+  if (!accountsLoading && accounts.length === 0) {
+    return (
+      <Result
+        status="info"
+        title="还没有账号"
+        subTitle="读取邮件前需要先添加 iCloud 账号，并配置 Cookie 或 App 专用密码。"
+        extra={
+          <Link to="/accounts">
+            <Button type="primary">去添加账号</Button>
+          </Link>
         }
-      })
-      .catch((err) => {
-        if (cancelled) return
-        setError(err instanceof ApiError ? err.message : '网络连接失败，请检查服务状态')
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  // 账号变化时加载别名列表(供筛选)
-  useEffect(() => {
-    if (!accountId) return
-    let cancelled = false
-    request<{ account_id: string; count: number; aliases: Alias[] }>(
-      `/api/aliases?account_id=${encodeURIComponent(accountId)}`,
+      />
     )
-      .then((data) => {
-        if (cancelled) return
-        setAliases(data.aliases ?? [])
-      })
-      .catch(() => {
-        if (cancelled) return
-        setAliases([])
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [accountId])
-
-  // 查询收件箱;账号变化时清空旧邮件并中止旧请求
-  useEffect(() => {
-    if (!accountId) return
-    abortRef.current?.abort()
-    const controller = new AbortController()
-    abortRef.current = controller
-    let cancelled = false
-    const params = new URLSearchParams({ account_id: accountId })
-    if (alias) params.set('alias', alias)
-    params.set('limit', String(limit))
-    params.set('days', String(days))
-    request<InboxResult>(`/api/inbox?${params.toString()}`, {
-      signal: controller.signal,
-    })
-      .then((data) => {
-        if (cancelled) return
-        setResult(data)
-        setError('')
-      })
-      .catch((err) => {
-        if (cancelled || err instanceof ApiError && err.status === 0) return
-        setError(err instanceof ApiError ? err.message : '网络连接失败，请检查服务状态')
-        setResult(null)
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-    return () => {
-      cancelled = true
-      controller.abort()
-    }
-  }, [accountId, alias, limit, days, retryKey])
-
-  const qAlias = useMemo(() => alias, [alias])
-
-  function handleSearch() {
-    const next: Record<string, string> = { account_id: accountId }
-    if (qAlias) next.alias = qAlias
-    next.limit = String(limit)
-    next.days = String(days)
-    setSearchParams(next, { replace: true })
-    setRetryKey((k) => k + 1)
   }
-
-  function handleAccountChange(id: string) {
-    setAccountId(id)
-    setAlias('')
-    setResult(null)
-    setSearchParams({ account_id: id }, { replace: true })
-  }
-
-  const methodText = result?.method === 'imap' ? 'IMAP' : 'Web API'
 
   return (
-    <section>
-      <div className="page-header">
-        <div className="page-title">
-          <h2>收件箱摘要</h2>
-          <p>查看发往隐私别名的邮件（仅显示纯文本摘要）</p>
+    <div className="page">
+      <div className="page-head">
+        <div>
+          <h2>取件</h2>
+          <p>读取发往 Hide My Email 别名的邮件，可按别名与时间范围筛选</p>
         </div>
+        {data && (
+          <Tag
+            icon={data.method === 'imap' ? <KeyOutlined /> : <CloudServerOutlined />}
+            color={data.method === 'imap' ? 'cyan' : 'default'}
+          >
+            读取方式：{data.method === 'imap' ? 'IMAP (App 密码)' : 'Web API (Cookie)'}
+          </Tag>
+        )}
       </div>
 
-      <div className="card" style={{ marginBottom: 16 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
-          <div className="form-field" style={{ marginBottom: 0 }}>
+      <Card variant="borderless" style={{ marginBottom: 16 }}>
+        <Space wrap align="end" size={12}>
+          <div className="field">
             <label htmlFor="inbox-account">账号</label>
-            <select
+            <Select
               id="inbox-account"
-              value={accountId}
-              onChange={(e) => handleAccountChange(e.target.value)}
-            >
-              {accounts.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name}
-                </option>
-              ))}
-            </select>
+              value={accountId || undefined}
+              style={{ minWidth: 180 }}
+              loading={accountsLoading}
+              onChange={(value) => setSearchParams({ account_id: value }, { replace: true })}
+              options={accounts.map((a) => ({ value: a.id, label: a.name }))}
+            />
           </div>
-          <div className="form-field" style={{ marginBottom: 0 }}>
+          <div className="field">
             <label htmlFor="inbox-alias">别名</label>
-            <select
+            <Select
               id="inbox-alias"
-              value={alias}
-              onChange={(e) => setAlias(e.target.value)}
-            >
-              <option value="">全部</option>
-              {aliases.map((a) => (
-                <option key={a.anonymousId} value={a.email}>
-                  {a.email}
-                </option>
-              ))}
-            </select>
+              value={alias || undefined}
+              allowClear
+              showSearch
+              style={{ minWidth: 260 }}
+              placeholder="全部别名"
+              onChange={(value) => updateAlias(value ?? '')}
+              options={(aliasData?.aliases ?? []).map((a) => ({
+                value: a.email,
+                label: a.label ? `${a.email}（${a.label}）` : a.email,
+              }))}
+            />
           </div>
-          <div className="form-field" style={{ marginBottom: 0 }}>
-            <label htmlFor="inbox-limit">每页</label>
-            <select
-              id="inbox-limit"
-              value={limit}
-              onChange={(e) => setLimit(Number(e.target.value))}
-            >
-              <option value={1}>1</option>
-              <option value={20}>20</option>
-              <option value={100}>100</option>
-            </select>
-          </div>
-          <div className="form-field" style={{ marginBottom: 0 }}>
+          <div className="field">
             <label htmlFor="inbox-days">时间范围</label>
-            <select
-              id="inbox-days"
-              value={days}
-              onChange={(e) => setDays(Number(e.target.value))}
-            >
-              <option value={1}>1 天</option>
-              <option value={7}>7 天</option>
-              <option value={30}>30 天</option>
-              <option value={90}>90 天</option>
-            </select>
+            <Select id="inbox-days" value={days} style={{ width: 130 }} options={DAY_OPTIONS} onChange={setDays} />
           </div>
-          <div style={{ display: 'flex', alignItems: 'flex-end' }}>
-            <button className="primary" onClick={handleSearch}>
-              查询
-            </button>
+          <div className="field">
+            <label htmlFor="inbox-limit">条数</label>
+            <Select id="inbox-limit" value={limit} style={{ width: 110 }} options={LIMIT_OPTIONS} onChange={setLimit} />
           </div>
-        </div>
-      </div>
+          <Button type="primary" icon={<ReloadOutlined />} onClick={reload} loading={loading}>
+            刷新
+          </Button>
+        </Space>
+      </Card>
 
-      <AsyncState
-        loading={loading}
-        error={error}
-        empty={!result || result.messages.length === 0}
-        emptyText="暂无邮件"
-        onRetry={() => {
-          setLoading(true)
-          setRetryKey((k) => k + 1)
-        }}
+      <Card
+        variant="borderless"
+        title={`收件箱${data ? ` · ${data.count} 封` : ''}`}
+        extra={<MailOutlined style={{ color: '#94a3b8' }} />}
       >
-        {result && result.messages.length > 0 && (
+        {error && <Alert type="error" showIcon title={error} style={{ marginBottom: 16 }} />}
+        <Table<InboxMessage>
+          rowKey="id"
+          columns={columns}
+          dataSource={data?.messages ?? []}
+          loading={loading}
+          pagination={{ pageSize: 20, hideOnSinglePage: true, showSizeChanger: false }}
+          scroll={{ x: 900 }}
+          locale={{ emptyText: '所选范围内没有邮件' }}
+        />
+      </Card>
+
+      <Drawer
+        open={detail !== null || detailLoading}
+        size={Math.min(680, typeof window === 'undefined' ? 680 : window.innerWidth - 32)}
+        title={detail?.subject || '邮件详情'}
+        onClose={() => setDetail(null)}
+        loading={detailLoading}
+        extra={
+          detail && (
+            <Popconfirm
+              title="删除该邮件？"
+              okText="删除"
+              okButtonProps={{ danger: true }}
+              cancelText="取消"
+              onConfirm={() => void deleteMessage(detail)}
+            >
+              <Button danger size="small" icon={<DeleteOutlined />}>
+                删除
+              </Button>
+            </Popconfirm>
+          )
+        }
+      >
+        {detail && (
           <>
-            <p className="hint" style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span>共 {result.count} 封</span>
-              <span className={result.method === 'imap' ? 'badge badge-info' : 'badge badge-neutral'}>
-                {result.method === 'imap' ? <IconKey size={12} /> : <IconMail size={12} />}
-                读取方式：{methodText}
-              </span>
-            </p>
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>主题</th>
-                    <th>发件人</th>
-                    <th>收件人</th>
-                    <th>日期</th>
-                    <th>摘要</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {result.messages.map((m) => (
-                    <tr key={m.id}>
-                      <td><button className="link-button" onClick={() => void openMessage(m)}>{m.subject || '（无主题）'}</button></td>
-                      <td>{m.from}</td>
-                      <td>{m.to}</td>
-                      <td>{formatDate(m.date)}</td>
-                      <td>{m.preview || '—'} <button className="icon-button danger" aria-label="删除邮件" title="删除邮件" onClick={() => setDeleteFor(m)}><IconTrash size={14} /></button></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <Descriptions
+              size="small"
+              column={1}
+              style={{ marginBottom: 16 }}
+              items={[
+                { key: 'from', label: '发件人', children: detail.from || '—' },
+                { key: 'to', label: '收件人', children: detail.to || '—' },
+                { key: 'date', label: '时间', children: formatDateTime(detail.date) },
+                { key: 'type', label: '内容类型', children: detail.content_type || 'text/plain' },
+              ]}
+            />
+            <MailBody key={detail.id} message={detail} />
+            <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginTop: 12 }}>
+              超长内容可在正文区域内滚动查看。
+            </Typography.Paragraph>
           </>
         )}
-      </AsyncState>
-      <Dialog title={detail?.subject || '邮件详情'} open={detail !== null || detailLoading} onClose={() => setDetail(null)}>
-        {detailLoading && <p className="hint">读取中…</p>}
-        {detail && <>
-          <p className="hint">发件人：{detail.from}</p>
-          <p className="hint">收件人：{detail.to}</p>
-          <p className="hint">日期：{formatDate(detail.date)}</p>
-          <pre className="mail-body">{detail.body || '无正文'}</pre>
-          <div className="form-actions"><button className="danger" onClick={() => setDeleteFor(detail)}>删除邮件</button><button onClick={() => setDetail(null)}>关闭</button></div>
-        </>}
-      </Dialog>
-      {deleteFor && <ConfirmDialog title="删除邮件" message="邮件将从收件箱中永久删除。" open busy={deleting} onClose={() => setDeleteFor(null)} onConfirm={() => void deleteMessage()} />}
-    </section>
+      </Drawer>
+    </div>
   )
 }

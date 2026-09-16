@@ -1,299 +1,343 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { request, ApiError } from '../api/client'
-import type { AccountSummary } from '../api/types'
-import AsyncState from '../components/AsyncState'
-import AccountFormDialog from '../components/AccountFormDialog'
-import CookieDialog from '../components/CookieDialog'
-import ICloudLoginDialog from '../components/ICloudLoginDialog'
-import AppPasswordDialog from '../components/AppPasswordDialog'
-import ProxyDialog from '../components/ProxyDialog'
-import MailboxDialog from '../components/MailboxDialog'
-import ConfirmDialog from '../components/ConfirmDialog'
-import { useToast } from '../components/ToastProvider'
 import {
-  IconCheck,
-  IconClock,
-  IconAlert,
-  IconPlus,
-  IconEdit,
-  IconTrash,
-  IconKey,
-  IconMail,
-} from '../components/icons'
+  Alert,
+  App as AntdApp,
+  Button,
+  Card,
+  Dropdown,
+  Result,
+  Space,
+  Table,
+  Tag,
+  Typography,
+} from 'antd'
+import type { TableProps } from 'antd'
+import {
+  ApiOutlined,
+  CloudUploadOutlined,
+  DeleteOutlined,
+  DownOutlined,
+  EditOutlined,
+  InboxOutlined,
+  KeyOutlined,
+  MailOutlined,
+  PlusOutlined,
+  SafetyOutlined,
+} from '@ant-design/icons'
+import { ApiError, request } from '../api/client'
+import { useAccounts } from '../api/hooks'
+import type { AccountSummary } from '../api/types'
+import { AccountFormModal, CredentialModal, ICloudLoginModal, MailboxModal } from '../components/AccountModals'
 
-const statusMeta: Record<string, { text: string; badge: string; icon: typeof IconCheck }> = {
-  active: { text: '正常', badge: 'badge badge-active', icon: IconCheck },
-  pending: { text: '待配置', badge: 'badge badge-pending', icon: IconClock },
-  error: { text: '异常', badge: 'badge badge-error', icon: IconAlert },
-}
-
-function StatusBadge({ status }: { status: string }) {
-  const meta = statusMeta[status] ?? {
-    text: status,
-    badge: 'badge badge-neutral',
-    icon: IconClock,
-  }
-  const Icon = meta.icon
-  return (
-    <span className={meta.badge}>
-      <Icon />
-      {meta.text}
-    </span>
-  )
-}
-
-function credText(acc: AccountSummary): string {
-  const parts: string[] = []
-  if (acc.has_cookies) parts.push('Cookie')
-  if (acc.has_app_password) parts.push('App密码')
-  if (acc.mailbox) parts.push(`收件箱:${acc.mailbox.email}`)
-  if (acc.has_proxy) parts.push('代理')
-  return parts.length > 0 ? `已配置（${parts.join('·')}）` : '未配置'
+const STATUS_META: Record<string, { text: string; color: string }> = {
+  active: { text: '正常', color: 'success' },
+  pending: { text: '待配置', color: 'warning' },
+  error: { text: '异常', color: 'error' },
 }
 
 export default function AccountsPage() {
-  const [accounts, setAccounts] = useState<AccountSummary[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [retryKey, setRetryKey] = useState(0)
+  const { accounts, loading, error, reload } = useAccounts()
+  const { message, modal } = AntdApp.useApp()
 
-  // dialog 状态
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing] = useState<AccountSummary | null>(null)
-  const [cookieFor, setCookieFor] = useState<AccountSummary | null>(null)
-  const [loginFor, setLoginFor] = useState<AccountSummary | null>(null)
-  const [appPwdFor, setAppPwdFor] = useState<AccountSummary | null>(null)
-  const [proxyFor, setProxyFor] = useState<AccountSummary | null>(null)
-  const [mailboxFor, setMailboxFor] = useState<AccountSummary | null>(null)
-  const [deleteFor, setDeleteFor] = useState<AccountSummary | null>(null)
-  const [deleting, setDeleting] = useState(false)
+  const [target, setTarget] = useState<AccountSummary | null>(null)
+  const [mode, setMode] = useState<'cookies' | 'password' | 'proxy' | 'login' | 'mailbox' | null>(null)
 
-  const { show } = useToast()
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const data = await request<AccountSummary[]>('/api/accounts')
-      setAccounts(data)
-      setError('')
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : '网络连接失败，请检查服务状态')
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    let cancelled = false
-    request<AccountSummary[]>('/api/accounts')
-      .then((data) => {
-        if (cancelled) return
-        setAccounts(data)
-        setError('')
-      })
-      .catch((err) => {
-        if (cancelled) return
-        setError(err instanceof ApiError ? err.message : '网络连接失败，请检查服务状态')
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [retryKey])
-
-  function handleRetry() {
-    setLoading(true)
-    setRetryKey((k) => k + 1)
+  function openCredential(account: AccountSummary, next: typeof mode) {
+    setTarget(account)
+    setMode(next)
   }
 
-  async function handleDelete() {
-    if (!deleteFor) return
-    setDeleting(true)
+  function closeCredential() {
+    setMode(null)
+    setTarget(null)
+  }
+
+  async function removeAccount(account: AccountSummary) {
     try {
-      await request(`/api/accounts/${deleteFor.id}`, { method: 'DELETE' })
-      setDeleteFor(null)
-      show('账号已删除')
-      void load()
+      await request(`/api/accounts/${encodeURIComponent(account.id)}`, { method: 'DELETE' })
+      message.success('账号已删除')
+      reload()
     } catch (err) {
-      show(err instanceof ApiError ? err.message : '删除失败')
-    } finally {
-      setDeleting(false)
+      modal.error({
+        title: '删除失败',
+        content: err instanceof ApiError ? err.message : '网络连接失败，请检查服务状态',
+      })
     }
   }
+
+  const columns: TableProps<AccountSummary>['columns'] = [
+    {
+      title: '账号',
+      dataIndex: 'name',
+      render: (name: string, account) => (
+        <>
+          <Typography.Text strong>{name}</Typography.Text>
+          {account.status_message && (
+            <Typography.Paragraph type="secondary" style={{ margin: 0, fontSize: 12 }}>
+              {account.status_message}
+            </Typography.Paragraph>
+          )}
+          <Typography.Text type="secondary" className="mono" style={{ fontSize: 12 }}>
+            {account.id}
+          </Typography.Text>
+        </>
+      ),
+    },
+    {
+      title: 'iCloud 邮箱',
+      dataIndex: 'icloud_email',
+      render: (value: string, account) => value || account.real_email || '—',
+    },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      width: 100,
+      render: (status: string) => {
+        const meta = STATUS_META[status] ?? { text: status, color: 'default' }
+        return <Tag color={meta.color}>{meta.text}</Tag>
+      },
+    },
+    {
+      title: '别名',
+      key: 'aliases',
+      width: 110,
+      render: (_, account) => (
+        <Typography.Text>
+          {account.alias_active} / {account.alias_total}
+        </Typography.Text>
+      ),
+    },
+    {
+      title: '凭据',
+      key: 'credentials',
+      width: 240,
+      render: (_, account) => (
+        <Space size={4} wrap>
+          {account.has_cookies && <Tag color="cyan">Cookie</Tag>}
+          {account.has_app_password && <Tag color="geekblue">App 密码</Tag>}
+          {account.mailbox && <Tag color="purple">收件箱 {account.mailbox.email}</Tag>}
+          {account.has_proxy && <Tag>代理</Tag>}
+          {!account.has_cookies && !account.has_app_password && (
+            <Typography.Text type="secondary">未配置</Typography.Text>
+          )}
+        </Space>
+      ),
+    },
+    {
+      title: '最近验证',
+      dataIndex: 'last_validated',
+      width: 170,
+      render: (value: string) => (value ? value : '—'),
+    },
+    {
+      title: '操作',
+      key: 'actions',
+      width: 210,
+      render: (_, account) => (
+        <Space size={4}>
+          <Button
+            type="link"
+            size="small"
+            icon={<EditOutlined />}
+            onClick={() => {
+              setEditing(account)
+              setFormOpen(true)
+            }}
+          >
+            编辑
+          </Button>
+          <Link to={`/inbox?account_id=${encodeURIComponent(account.id)}`}>
+            <Button type="link" size="small" icon={<InboxOutlined />}>
+              取件
+            </Button>
+          </Link>
+          <Dropdown
+            trigger={['click']}
+            menu={{
+              items: [
+                { key: 'cookies', icon: <SafetyOutlined />, label: '更新 Cookie' },
+                { key: 'login', icon: <KeyOutlined />, label: 'iCloud 密码登录' },
+                { key: 'password', icon: <MailOutlined />, label: '设置 App 专用密码' },
+                { key: 'mailbox', icon: <CloudUploadOutlined />, label: '接入收件邮箱' },
+                { key: 'proxy', icon: <ApiOutlined />, label: '设置代理' },
+                { type: 'divider' },
+                { key: 'delete', icon: <DeleteOutlined />, label: '删除账号', danger: true },
+              ],
+              onClick: ({ key }) => {
+                if (key === 'delete') {
+                  modal.confirm({
+                    title: `删除账号「${account.name}」？`,
+                    content: '只会移除本地配置，不会影响 Apple 账号本身。',
+                    okText: '删除',
+                    okButtonProps: { danger: true },
+                    cancelText: '取消',
+                    onOk: () => removeAccount(account),
+                  })
+                  return
+                }
+                openCredential(account, key as typeof mode)
+              },
+            }}
+          >
+            <Button type="link" size="small">
+              凭据配置 <DownOutlined />
+            </Button>
+          </Dropdown>
+        </Space>
+      ),
+    },
+  ]
 
   return (
-    <section>
-      <div className="page-header">
-        <div className="page-title">
-          <h2>账号管理</h2>
-          <p>管理 iCloud 账号、Cookie 与登录凭据</p>
+    <div className="page">
+      <div className="page-head">
+        <div>
+          <h2>账号设置</h2>
+          <p>管理 iCloud 账号与取件凭据（Cookie / App 专用密码 / 收件邮箱）</p>
         </div>
-        <button
-          className="primary"
+        <Button
+          type="primary"
+          icon={<PlusOutlined />}
           onClick={() => {
             setEditing(null)
             setFormOpen(true)
           }}
         >
-          <IconPlus size={16} />
           添加账号
-        </button>
+        </Button>
       </div>
 
-      <AsyncState
-        loading={loading}
-        error={error}
-        empty={accounts.length === 0}
-        emptyText="暂无账号，点击“添加账号”开始"
-        onRetry={handleRetry}
-      >
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>名称</th>
-                <th>邮箱</th>
-                <th>状态</th>
-                <th>别名</th>
-                <th>凭据</th>
-                <th>最近验证</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {accounts.map((acc) => (
-                <tr key={acc.id}>
-                  <td>
-                    {acc.name}
-                    {acc.status_message && (
-                      <span className="hint" style={{ display: 'block' }}>
-                        {acc.status_message}
-                      </span>
-                    )}
-                  </td>
-                  <td>
-                    {acc.icloud_email || acc.real_email || '—'}
-                    <span className="cell-secondary">{acc.id}</span>
-                  </td>
-                  <td>
-                    <StatusBadge status={acc.status} />
-                  </td>
-                  <td>
-                    <span className="cell-strong">
-                      {acc.alias_active} / {acc.alias_total}
-                    </span>
-                  </td>
-                  <td>{credText(acc)}</td>
-                  <td>{acc.last_validated ? acc.last_validated : '—'}</td>
-                  <td>
-                    <div className="row-actions">
-                      <button onClick={() => { setEditing(acc); setFormOpen(true) }}>
-                        <IconEdit size={14} />
-                        编辑
-                      </button>
-                      <button onClick={() => setCookieFor(acc)}>更新 Cookie</button>
-                      <button onClick={() => setLoginFor(acc)}>
-                        <IconKey size={14} />
-                        iCloud 登录
-                      </button>
-                      <button onClick={() => setAppPwdFor(acc)}>设置 App 密码</button>
-                      <button onClick={() => setMailboxFor(acc)}>接入收件邮箱</button>
-                      <button onClick={() => setProxyFor(acc)}>设置代理</button>
-                      <Link to={`/aliases?account_id=${acc.id}`}>别名</Link>
-                      <Link to={`/inbox?account_id=${acc.id}`}>
-                        <IconMail size={14} />
-                        收件箱
-                      </Link>
-                      <button className="danger" onClick={() => setDeleteFor(acc)}>
-                        <IconTrash size={14} />
-                        删除
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </AsyncState>
+      <Card variant="borderless">
+        {error && (
+          <Alert
+            type="error"
+            showIcon
+            message={error}
+            style={{ marginBottom: 16 }}
+            action={<Button size="small" onClick={reload}>重试</Button>}
+          />
+        )}
+        {!loading && accounts.length === 0 && !error ? (
+          <Result
+            status="info"
+            title="还没有账号"
+            subTitle="添加 iCloud 账号后即可创建别名并取件。"
+            extra={
+              <Button
+                type="primary"
+                onClick={() => {
+                  setEditing(null)
+                  setFormOpen(true)
+                }}
+              >
+                添加账号
+              </Button>
+            }
+          />
+        ) : (
+          <Table<AccountSummary>
+            rowKey="id"
+            columns={columns}
+            dataSource={accounts}
+            loading={loading}
+            pagination={false}
+            scroll={{ x: 1180 }}
+          />
+        )}
+      </Card>
 
-      <AccountFormDialog
+      <AccountFormModal
         open={formOpen}
+        editing={editing}
         onClose={() => setFormOpen(false)}
         onSaved={() => {
-          setFormOpen(false)
-          show('账号已保存')
-          void load()
+          message.success(editing ? '账号已更新' : '账号已添加')
+          reload()
         }}
-        editing={editing ? { id: editing.id, name: editing.name, icloudEmail: editing.icloud_email, host: editing.host } : null}
       />
-      {cookieFor && (
-        <CookieDialog
-          accountId={cookieFor.id}
+
+      {target && mode === 'cookies' && (
+        <CredentialModal
           open
-          onClose={() => setCookieFor(null)}
+          title="更新 Cookie"
+          description="粘贴 iCloud 网页版的 Cookie（请求头字符串或 JSON），有效期约 24 小时。"
+          accountId={target.id}
+          endpoint="/api/accounts/:id/cookies"
+          method="PUT"
+          fields={[{ name: 'cookies', label: 'Cookie', type: 'textarea', required: true, placeholder: 'a=1; b=2' }]}
+          onClose={closeCredential}
           onSaved={() => {
-            show('Cookie 已更新')
-            void load()
+            message.success('Cookie 已更新')
+            reload()
           }}
         />
       )}
-      {loginFor && (
-        <ICloudLoginDialog
-          accountId={loginFor.id}
+
+      {target && mode === 'password' && (
+        <CredentialModal
           open
-          onClose={() => setLoginFor(null)}
+          title="设置 App 专用密码"
+          description="App 专用密码用于 IMAP 取件，可在 appleid.apple.com 生成。"
+          accountId={target.id}
+          endpoint="/api/accounts/:id/password"
+          method="POST"
+          fields={[
+            { name: 'icloud_email', label: '邮箱', required: true, initialValue: target.icloud_email || target.real_email },
+            { name: 'app_password', label: 'App 专用密码', type: 'password', required: true },
+          ]}
+          onClose={closeCredential}
           onSaved={() => {
-            show('登录成功')
-            void load()
+            message.success('App 专用密码已保存')
+            reload()
           }}
         />
       )}
-      {appPwdFor && (
-        <AppPasswordDialog
-          accountId={appPwdFor.id}
+
+      {target && mode === 'proxy' && (
+        <CredentialModal
           open
-          onClose={() => setAppPwdFor(null)}
+          title="设置代理"
+          description="留空保存即可清除代理；出于安全考虑不回显当前值。"
+          accountId={target.id}
+          endpoint="/api/accounts/:id/proxy"
+          method="PUT"
+          fields={[{ name: 'proxy', label: '代理地址', placeholder: 'http://user:pass@host:port' }]}
+          buildBody={(values) => ({ proxy: String(values.proxy ?? '').trim() })}
+          onClose={closeCredential}
           onSaved={() => {
-            show('App 专用密码已设置')
-            void load()
+            message.success('代理已更新')
+            reload()
           }}
         />
       )}
-      {proxyFor && (
-        <ProxyDialog
-          accountId={proxyFor.id}
+
+      {target && mode === 'login' && (
+        <ICloudLoginModal
           open
-          onClose={() => setProxyFor(null)}
+          accountId={target.id}
+          onClose={closeCredential}
           onSaved={() => {
-            show('代理已更新')
-            void load()
+            message.success('登录成功，Cookie 已更新')
+            reload()
           }}
         />
       )}
-      {mailboxFor && (
-        <MailboxDialog
-          accountId={mailboxFor.id}
-          current={mailboxFor.mailbox}
+
+      {target && mode === 'mailbox' && (
+        <MailboxModal
           open
-          onClose={() => setMailboxFor(null)}
-          onSaved={() => { setMailboxFor(null); show('收件邮箱已接入'); void load() }}
+          accountId={target.id}
+          current={target.mailbox}
+          onClose={closeCredential}
+          onSaved={() => {
+            message.success('收件邮箱已接入')
+            reload()
+          }}
         />
       )}
-      {deleteFor && (
-        <ConfirmDialog
-          title="删除账号"
-          message={`将移除本地账号配置「${deleteFor.name}」，不会删除 Apple 账号本身。`}
-          requireText={deleteFor.name}
-          open
-          busy={deleting}
-          onClose={() => setDeleteFor(null)}
-          onConfirm={() => void handleDelete()}
-        />
-      )}
-    </section>
+    </div>
   )
 }

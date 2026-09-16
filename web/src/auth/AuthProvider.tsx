@@ -1,33 +1,7 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { request, registerUnauthorizedHandler, setCSRFToken } from '../api/client'
 import type { LoginResult } from '../api/types'
-
-type AuthStatus = 'checking' | 'anonymous' | 'authenticated'
-
-interface AuthContextValue {
-  status: AuthStatus
-  login: (password: string) => Promise<void>
-  logout: () => Promise<void>
-}
-
-const AuthContext = createContext<AuthContextValue | null>(null)
-
-export function useAuth(): AuthContextValue {
-  const ctx = useContext(AuthContext)
-  if (!ctx) {
-    throw new Error('useAuth 必须在 AuthProvider 内使用')
-  }
-  return ctx
-}
+import { AuthContext, type AuthStatus, type AuthContextValue } from './useAuth'
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>('checking')
@@ -73,6 +47,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     registerUnauthorizedHandler(handleUnauthorized)
     return () => registerUnauthorizedHandler(null)
   }, [handleUnauthorized])
+
   const login = useCallback(async (password: string) => {
     const data = await request<LoginResult>('/api/auth/login', {
       method: 'POST',
@@ -82,7 +57,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setStatus('authenticated')
   }, [])
 
-  const value = useMemo(
+  const value = useMemo<AuthContextValue>(
     () => ({ status, login, logout }),
     [status, login, logout],
   )

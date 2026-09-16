@@ -2,12 +2,17 @@ import { http, HttpResponse } from 'msw'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
+import { App as AntdApp, ConfigProvider } from 'antd'
+import zhCN from 'antd/locale/zh_CN'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { ReactNode } from 'react'
-import { AuthProvider, useAuth } from './AuthProvider'
+import { AuthProvider } from './AuthProvider'
+import { useAuth } from './useAuth'
 import { server } from '../test/server'
 import LoginPage from '../pages/LoginPage'
 import { setCSRFToken } from '../api/client'
+
+const LOGIN_HEADING = 'iCloud 隐私邮箱'
 
 function ProtectedProbe() {
   const { status } = useAuth()
@@ -23,16 +28,54 @@ function TestApp({ children }: { children?: ReactNode }) {
   return <>{children ?? <ProtectedProbe />}</>
 }
 
+function wrap(node: ReactNode) {
+  return (
+    <ConfigProvider locale={zhCN}>
+      <AntdApp>{node}</AntdApp>
+    </ConfigProvider>
+  )
+}
+
 function renderApp(initialPath = '/accounts') {
   return render(
-    <MemoryRouter initialEntries={[initialPath]}>
-      <AuthProvider>
-        <Routes>
-          <Route path="/login" element={<TestApp />} />
-          <Route path="/accounts" element={<TestApp />} />
-        </Routes>
-      </AuthProvider>
-    </MemoryRouter>,
+    wrap(
+      <MemoryRouter initialEntries={[initialPath]}>
+        <AuthProvider>
+          <Routes>
+            <Route path="/login" element={<TestApp />} />
+            <Route path="/accounts" element={<TestApp />} />
+            <Route path="/aliases" element={<TestApp />} />
+          </Routes>
+        </AuthProvider>
+      </MemoryRouter>,
+    ),
+  )
+}
+
+function renderLogoutProbe() {
+  return render(
+    wrap(
+      <MemoryRouter initialEntries={['/accounts']}>
+        <AuthProvider>
+          <Routes>
+            <Route path="/login" element={<TestApp />} />
+            <Route path="/accounts" element={<LogoutProbe />} />
+          </Routes>
+        </AuthProvider>
+      </MemoryRouter>,
+    ),
+  )
+}
+
+function LogoutProbe() {
+  const { status, logout } = useAuth()
+  if (status === 'checking') return <p>loading…</p>
+  if (status === 'anonymous') return <LoginPage />
+  return (
+    <div>
+      <p data-testid="protected">已登录页面</p>
+      <button onClick={() => void logout()}>退出登录</button>
+    </div>
   )
 }
 
@@ -69,10 +112,10 @@ describe('AuthProvider + LoginPage', () => {
       ),
     )
     renderApp()
-    expect(await screen.findByRole('heading', { name: 'iCloud HME 管理台' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: LOGIN_HEADING })).toBeInTheDocument()
   })
 
-  it('登录成功进入 /accounts', async () => {
+  it('登录成功进入受保护页', async () => {
     server.use(
       http.get('/api/auth/session', () =>
         HttpResponse.json(
@@ -92,9 +135,9 @@ describe('AuthProvider + LoginPage', () => {
     )
     renderApp()
     const user = userEvent.setup()
-    await screen.findByRole('heading', { name: 'iCloud HME 管理台' })
+    await screen.findByRole('heading', { name: LOGIN_HEADING })
     await user.type(screen.getByLabelText(/管理员密码/), 'admin-pass-2026')
-    await user.click(screen.getByRole('button', { name: /登录/ }))
+    await user.click(screen.getByRole('button', { name: /登\s*录/ }))
     expect(await screen.findByTestId('protected')).toBeInTheDocument()
   })
 
@@ -115,9 +158,9 @@ describe('AuthProvider + LoginPage', () => {
     )
     renderApp()
     const user = userEvent.setup()
-    await screen.findByRole('heading', { name: 'iCloud HME 管理台' })
+    await screen.findByRole('heading', { name: LOGIN_HEADING })
     await user.type(screen.getByLabelText(/管理员密码/), 'wrong-password')
-    await user.click(screen.getByRole('button', { name: /登录/ }))
+    await user.click(screen.getByRole('button', { name: /登\s*录/ }))
     const alert = await screen.findByRole('alert')
     expect(alert).toHaveTextContent('管理员密码错误')
     expect(alert).not.toHaveTextContent('wrong-password')
@@ -157,33 +200,12 @@ describe('AuthProvider + LoginPage', () => {
         HttpResponse.json({ success: true, data: { logged_out: true } }),
       ),
     )
-    render(
-      <MemoryRouter initialEntries={['/accounts']}>
-        <AuthProvider>
-          <Routes>
-            <Route path="/login" element={<TestApp />} />
-            <Route path="/accounts" element={<LogoutProbe />} />
-          </Routes>
-        </AuthProvider>
-      </MemoryRouter>,
-    )
+    renderLogoutProbe()
     const user = userEvent.setup()
     await screen.findByTestId('protected')
     await user.click(screen.getByRole('button', { name: /退出登录/ }))
     await waitFor(() =>
-      expect(screen.getByRole('heading', { name: 'iCloud HME 管理台' })).toBeInTheDocument(),
+      expect(screen.getByRole('heading', { name: LOGIN_HEADING })).toBeInTheDocument(),
     )
   })
 })
-
-function LogoutProbe() {
-  const { status, logout } = useAuth()
-  if (status === 'checking') return <p>loading…</p>
-  if (status === 'anonymous') return <LoginPage />
-  return (
-    <div>
-      <p data-testid="protected">已登录页面</p>
-      <button onClick={() => void logout()}>退出登录</button>
-    </div>
-  )
-}
