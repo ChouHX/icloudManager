@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -87,12 +88,35 @@ func NewManager(dataDir string) (*Manager, error) {
 		accounts: make(map[string]*Account),
 		dataDir:  dataDir,
 		dataFile: filepath.Join(dataDir, "accounts.json"),
-		imapPool: mail.NewPool(),
+		imapPool: mail.NewPoolWithOptions(mail.PoolOptions{MaxConns: imapPoolSize()}),
 	}
 	if err := m.load(); err != nil {
 		return nil, err
 	}
 	return m, nil
+}
+
+// 每账号 IMAP 最大并发连接数的默认值与边界。
+const (
+	defaultIMAPPoolSize = 10
+	minIMAPPoolSize     = 1
+	maxIMAPPoolSize     = 50
+)
+
+// imapPoolSize 返回每账号 IMAP 最大并发连接数。
+//
+// 默认 10,可用环境变量 ICLOUD_HME_IMAP_POOL_SIZE 覆盖(1-50)。
+// 同一个账号的多个取件请求会各占一条连接,超出上限则排队等待。
+func imapPoolSize() int {
+	raw := strings.TrimSpace(os.Getenv("ICLOUD_HME_IMAP_POOL_SIZE"))
+	if raw == "" {
+		return defaultIMAPPoolSize
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < minIMAPPoolSize || value > maxIMAPPoolSize {
+		return defaultIMAPPoolSize
+	}
+	return value
 }
 
 // Close 释放 IMAP 连接池等资源。

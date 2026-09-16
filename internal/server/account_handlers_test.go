@@ -49,7 +49,7 @@ func TestAccountResponseNoSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := newWithBackend(&managerBackend{mgr: mgr}, Config{
+	s := mustServer(t, &managerBackend{mgr: mgr}, Config{
 		Debug:         false,
 		AdminPassword: "admin-pass-2026-strong",
 	})
@@ -107,7 +107,7 @@ func TestAccountLoginResponseNoSecrets(t *testing.T) {
 			HasCookies: true, HasAppPassword: true, HasProxy: true,
 		}},
 	}
-	s := newWithBackend(f, Config{
+	s := mustServer(t, f, Config{
 		Debug:         false,
 		AdminPassword: "admin-pass-2026-strong",
 	})
@@ -150,7 +150,7 @@ func TestAccountHandlerValidation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := newWithBackend(&managerBackend{mgr: mgr}, Config{
+	s := mustServer(t, &managerBackend{mgr: mgr}, Config{
 		Debug:         false,
 		AdminPassword: "admin-pass-2026-strong",
 	})
@@ -195,7 +195,7 @@ func TestAccountHandlerValidation(t *testing.T) {
 // TestAccountUpdateCookiesAcceptString 验证 PUT cookies 同时接受字符串和对象。
 func TestAccountUpdateCookiesAcceptString(t *testing.T) {
 	f := &fakeBackend{accounts: []account.Summary{{ID: "acc_1", Name: "主号"}}}
-	s := newWithBackend(f, Config{
+	s := mustServer(t, f, Config{
 		Debug:         false,
 		AdminPassword: "admin-pass-2026-strong",
 	})
@@ -226,7 +226,7 @@ func TestAccountUpdateCookiesAcceptString(t *testing.T) {
 // TestAccountDeleteNotFound 验证删除不存在的账号返回 404/ACCOUNT_NOT_FOUND。
 func TestAccountDeleteNotFound(t *testing.T) {
 	f := &fakeBackend{removedOK: false}
-	s := newWithBackend(f, Config{
+	s := mustServer(t, f, Config{
 		Debug:         false,
 		AdminPassword: "admin-pass-2026-strong",
 	})

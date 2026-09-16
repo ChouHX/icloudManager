@@ -11,8 +11,12 @@ import (
 const maxBodyBytes = 1 << 20 // 1 MiB
 
 // securityHeaders 是全局安全响应头。
+//
+// style-src 需要 'unsafe-inline':前端使用 Ant Design,其样式由运行时 CSS-in-JS
+// 注入 <style> 元素,组件同时依赖内联 style 属性(弹层定位、动画、列宽等)。
+// script-src 保持 'self' 且未开放 'unsafe-eval',脚本执行面未被放宽。
 var securityHeaders = map[string]string{
-	"Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+	"Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
 	"X-Content-Type-Options":  "nosniff",
 	"Referrer-Policy":         "no-referrer",
 	"Permissions-Policy":      "camera=(), microphone=(), geolocation=()",
@@ -32,6 +36,18 @@ func securityHeadersMiddleware() gin.HandlerFunc {
 func apiCacheControlMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Header("Cache-Control", "no-store")
+		c.Next()
+	}
+}
+
+// bodyLimitMiddleware 限制请求体大小。
+//
+// 超限时读取会失败,绑定层按参数错误返回 400,避免超大 JSON 造成内存放大。
+func bodyLimitMiddleware(maxBytes int64) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if c.Request.Body != nil {
+			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes)
+		}
 		c.Next()
 	}
 }

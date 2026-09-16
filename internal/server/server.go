@@ -12,16 +12,19 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"io/fs"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"icloud-hme/internal/account"
 	"icloud-hme/internal/auth"
+	"icloud-hme/internal/mail"
 	"icloud-hme/internal/webui"
 )
 
@@ -40,39 +43,47 @@ type Server struct {
 	limiter *auth.Limiter
 	cfg     Config
 	r       *gin.Engine
+
+	// 后台自动建满任务(全局单任务,见 autocreate.go)
+	autoMu sync.Mutex
+	auto   *autoCreateTask
+	// autoSleep 允许测试替换等待实现,生产路径为 nil(使用真实计时)
+	autoSleep func(ctx context.Context, d time.Duration) bool
+	// autoJitter 允许测试替换随机间隔,生产路径为 nil(使用等概率随机)
+	autoJitter func(min, max time.Duration) time.Duration
 }
 
 // New 创建 Server。mgr 为账号管理器,cfg 为安全配置。
 func New(mgr *account.Manager, cfg Config) (*Server, error) {
-	if _, err := auth.NewManager(auth.Options{
-		Password: cfg.AdminPassword,
-		TTL:      cfg.SessionTTL,
-	}); err != nil {
-		return nil, err
-	}
-	return newWithBackend(&managerBackend{mgr: mgr}, cfg), nil
+	return newWithBackend(&managerBackend{mgr: mgr}, cfg)
 }
 
 // newWithBackend 创建 Server 并注入 Backend(测试使用内存 fake)。
-func newWithBackend(be Backend, cfg Config) *Server {
+//
+// 管理员密码不可用(如长度不足)时返回错误,避免以 nil 认证管理器启动服务。
+func newWithBackend(be Backend, cfg Config) (*Server, error) {
+	authManager, err := auth.NewManager(auth.Options{
+		Password: cfg.AdminPassword,
+		TTL:      cfg.SessionTTL,
+	})
+	if err != nil {
+		return nil, err
+	}
 	if !cfg.Debug {
 		gin.SetMode(gin.ReleaseMode)
 	}
 	s := &Server{
 		be:      be,
+		auth:    authManager,
 		limiter: auth.NewLimiter(nil, 15*time.Minute, 5, 10000),
 		cfg:     cfg,
 	}
-	s.auth, _ = auth.NewManager(auth.Options{
-		Password: cfg.AdminPassword,
-		TTL:      cfg.SessionTTL,
-	})
 	s.r = gin.New()
 	s.r.Use(gin.Logger(), gin.Recovery(), securityHeadersMiddleware())
 	// 不信任任意代理头,登录限流使用真实连接 IP
 	_ = s.r.SetTrustedProxies(nil)
 	s.register()
-	return s
+	return s, nil
 }
 
 // Run 启动 HTTP 服务。
@@ -85,7 +96,7 @@ func (s *Server) Handler() http.Handler { return s.r }
 
 func (s *Server) register() {
 	api := s.r.Group("/api")
-	api.Use(apiCacheControlMiddleware())
+	api.Use(apiCacheControlMiddleware(), bodyLimitMiddleware(maxBodyBytes))
 	{
 		// ===== 认证(公开) =====
 		api.POST("/auth/login", s.handleLogin)
@@ -122,13 +133,19 @@ func (s *Server) register() {
 			authed.POST("/aliases/:id/reactivate", csrfCheck(s.auth), s.reactivateAliasHandler)
 			authed.DELETE("/aliases/:id", csrfCheck(s.auth), s.deleteAliasHandler)
 
+			// ===== 后台任务:自动建满别名 =====
+			authed.GET("/autocreate", s.autoCreateStatusHandler)
+			authed.POST("/autocreate/start", csrfCheck(s.auth), s.startAutoCreateHandler)
+			authed.POST("/autocreate/stop", csrfCheck(s.auth), s.stopAutoCreateHandler)
+
 			// ===== 系统 =====
 			authed.POST("/reload", csrfCheck(s.auth), s.reloadConfigHandler)
 		}
 	}
 	// API 404 返回 JSON,绝不让 NoRoute 把拼错的 API 路径变成 HTML
 	s.r.NoRoute(func(c *gin.Context) {
-		if strings.HasPrefix(c.Request.URL.Path, "/api/") {
+		if strings.HasPrefix(c.Request.URL.Path, "/api") {
+			c.Header("Cache-Control", "no-store")
 			failCode(c, http.StatusNotFound, "VALIDATION_ERROR", "接口不存在")
 			return
 		}
@@ -230,11 +247,16 @@ func (s *Server) listInboxHandler(c *gin.Context) {
 func (s *Server) getMessageHandler(c *gin.Context) {
 	accountID := c.Query("account_id")
 	uid, err := strconv.ParseUint(c.Param("message_id"), 10, 32)
-	if accountID == "" || err != nil {
+	if accountID == "" || err != nil || uid == 0 {
 		failCode(c, http.StatusBadRequest, "VALIDATION_ERROR", "account_id 或邮件 ID 无效")
 		return
 	}
-	message, err := s.be.GetMessage(accountID, uint32(uid))
+	// sanitize=1 额外返回清理后的 HTML;raw=1 额外返回完整 RFC822 报文
+	opts := mail.MessageOptions{
+		Sanitize:   queryBool(c, "sanitize"),
+		IncludeRaw: queryBool(c, "raw"),
+	}
+	message, err := s.be.GetMessage(accountID, uint32(uid), opts)
 	if err != nil {
 		backendFail(c, err)
 		return
@@ -242,10 +264,20 @@ func (s *Server) getMessageHandler(c *gin.Context) {
 	ok(c, message)
 }
 
+// queryBool 解析 1/true/yes 形式的布尔查询参数。
+func queryBool(c *gin.Context, key string) bool {
+	switch strings.ToLower(strings.TrimSpace(c.Query(key))) {
+	case "1", "true", "yes":
+		return true
+	default:
+		return false
+	}
+}
+
 func (s *Server) deleteMessageHandler(c *gin.Context) {
 	accountID := c.Query("account_id")
 	uid, err := strconv.ParseUint(c.Param("message_id"), 10, 32)
-	if accountID == "" || err != nil {
+	if accountID == "" || err != nil || uid == 0 {
 		failCode(c, http.StatusBadRequest, "VALIDATION_ERROR", "account_id 或邮件 ID 无效")
 		return
 	}

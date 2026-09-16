@@ -9,10 +9,20 @@ import (
 	"testing/fstest"
 )
 
+// mustServer 构造测试用 Server,初始化失败直接终止测试。
+func mustServer(t *testing.T, be Backend, cfg Config) *Server {
+	t.Helper()
+	s, err := newWithBackend(be, cfg)
+	if err != nil {
+		t.Fatalf("初始化测试服务失败: %v", err)
+	}
+	return s
+}
+
 // TestSPAAPI404JSON 验证 /api/not-found 返回 JSON 404 而非 HTML。
 func TestSPAAPI404JSON(t *testing.T) {
 	f := &fakeBackend{}
-	s := newWithBackend(f, Config{
+	s := mustServer(t, f, Config{
 		Debug:         false,
 		AdminPassword: "admin-pass-2026-strong",
 	})
@@ -39,7 +49,7 @@ func TestSPAAPI404JSON(t *testing.T) {
 // TestSPAIndexServed 验证根路径由 webui 服务(返回 index 而非 404)。
 func TestSPAIndexServed(t *testing.T) {
 	f := &fakeBackend{}
-	s := newWithBackend(f, Config{
+	s := mustServer(t, f, Config{
 		Debug:         false,
 		AdminPassword: "admin-pass-2026-strong",
 	})

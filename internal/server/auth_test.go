@@ -11,7 +11,7 @@ import (
 // TestAuthRequiresSession 验证不带 Cookie 的 API 返回 401/AUTH_REQUIRED。
 func TestAuthRequiresSession(t *testing.T) {
 	f := &fakeBackend{}
-	s, ts := newTestServer(f)
+	s, ts := newTestServer(t, f)
 	defer ts.Close()
 
 	req, _ := http.NewRequest("GET", ts.URL+"/api/accounts", nil)
@@ -35,7 +35,7 @@ func TestAuthRequiresSession(t *testing.T) {
 // TestAuthWrongPassword 验证错误密码返回 401/INVALID_CREDENTIALS 且不设置 Cookie。
 func TestAuthWrongPassword(t *testing.T) {
 	f := &fakeBackend{}
-	_, ts := newTestServer(f)
+	_, ts := newTestServer(t, f)
 	defer ts.Close()
 
 	req, _ := http.NewRequest("POST", ts.URL+"/api/auth/login", strings.NewReader(`{"password":"wrong-password"}`))
@@ -61,7 +61,7 @@ func TestAuthWrongPassword(t *testing.T) {
 // TestAuthLoginSuccess 验证正确登录设置 HttpOnly/SameSite=Strict Cookie。
 func TestAuthLoginSuccess(t *testing.T) {
 	f := &fakeBackend{}
-	_, ts := newTestServer(f)
+	_, ts := newTestServer(t, f)
 	defer ts.Close()
 
 	req, _ := http.NewRequest("POST", ts.URL+"/api/auth/login", strings.NewReader(`{"password":"admin-pass-2026-strong"}`))
@@ -108,7 +108,7 @@ func TestAuthLoginSuccess(t *testing.T) {
 // TestAuthSessionFlow 验证 Cookie 有效时 GET 成功;POST 需要 CSRF。
 func TestAuthSessionFlow(t *testing.T) {
 	f := &fakeBackend{}
-	_, ts := newTestServer(f)
+	_, ts := newTestServer(t, f)
 	defer ts.Close()
 
 	sess, csrf := login(t, ts, "admin-pass-2026-strong")
@@ -149,7 +149,7 @@ func TestAuthSessionFlow(t *testing.T) {
 // TestAuthLogout 验证退出后同一 Cookie 立即失效。
 func TestAuthLogout(t *testing.T) {
 	f := &fakeBackend{}
-	_, ts := newTestServer(f)
+	_, ts := newTestServer(t, f)
 	defer ts.Close()
 
 	sess, csrf := login(t, ts, "admin-pass-2026-strong")
@@ -174,7 +174,7 @@ func TestAuthLogout(t *testing.T) {
 // TestAuthRateLimit 验证同 IP 连续 6 次失败后第 6 次返回 429/RATE_LIMITED。
 func TestAuthRateLimit(t *testing.T) {
 	f := &fakeBackend{}
-	_, ts := newTestServer(f)
+	_, ts := newTestServer(t, f)
 	defer ts.Close()
 
 	var lastStatus int
@@ -199,7 +199,7 @@ func TestAuthRateLimit(t *testing.T) {
 // TestAuthSessionEndpoint 验证 GET /api/auth/session 返回 CSRF 与过期时间。
 func TestAuthSessionEndpoint(t *testing.T) {
 	f := &fakeBackend{}
-	_, ts := newTestServer(f)
+	_, ts := newTestServer(t, f)
 	defer ts.Close()
 
 	sess, _ := login(t, ts, "admin-pass-2026-strong")
@@ -226,7 +226,7 @@ func TestAuthSessionEndpoint(t *testing.T) {
 // TestAuthSessionEndpointInvalid 验证无效会话的 session 端点返回 401。
 func TestAuthSessionEndpointInvalid(t *testing.T) {
 	f := &fakeBackend{}
-	_, ts := newTestServer(f)
+	_, ts := newTestServer(t, f)
 	defer ts.Close()
 
 	req := authedReq(t, ts, "GET", "/api/auth/session", "")

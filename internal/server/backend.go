@@ -56,7 +56,7 @@ type Backend interface {
 	SetAliasActive(string, string, bool) (bool, error)
 	DeleteAlias(string, string) error
 	ListInbox(InboxQuery) (InboxResult, error)
-	GetMessage(string, uint32) (*mail.FullMessage, error)
+	GetMessage(string, uint32, mail.MessageOptions) (*mail.FullMessage, error)
 	DeleteMessage(string, uint32) error
 	Reload() error
 }
@@ -105,7 +105,17 @@ func (b *managerBackend) UpdateCookies(id, cookies string) (account.Summary, err
 		return account.Summary{}, &BackendError{Status: http.StatusBadRequest, Code: "VALIDATION_ERROR", Message: err.Error()}
 	}
 	if err := b.mgr.UpdateCookies(id, parsed); err != nil {
-		return account.Summary{}, mapAccountErr(err)
+		be := mapAccountErr(err)
+		// Cookie 校验失败的错误文本可能包含上游响应体,统一替换为固定文案,
+		// 避免把 iCloud 返回内容回显给调用方。
+		if be.Message != "账号不存在" && be.Message != "账号未配置 Cookie" {
+			return account.Summary{}, &BackendError{
+				Status:  http.StatusBadRequest,
+				Code:    "VALIDATION_ERROR",
+				Message: "Cookie 校验失败,请检查 Cookie 是否有效或已过期",
+			}
+		}
+		return account.Summary{}, be
 	}
 	sum, ok := b.mgr.GetAccount(id)
 	if !ok {
@@ -137,8 +147,13 @@ func (b *managerBackend) SetAppPassword(id, icloudEmail, appPassword string) (ac
 // SetMailbox configures and verifies an external IMAP mailbox.
 func (b *managerBackend) SetMailbox(id string, config account.MailboxConfig) (account.Summary, error) {
 	if err := b.mgr.SetMailbox(id, config); err != nil {
-		if strings.Contains(err.Error(), "账号不存在") {
+		msg := err.Error()
+		if strings.Contains(msg, "账号不存在") {
 			return account.Summary{}, &BackendError{Status: http.StatusNotFound, Code: "ACCOUNT_NOT_FOUND", Message: "账号不存在"}
+		}
+		// 本地参数校验错误是 400;只有 IMAP 实际验证失败才归为上游错误 502。
+		if strings.Contains(msg, "不能为空") || strings.Contains(msg, "无效") {
+			return account.Summary{}, &BackendError{Status: http.StatusBadRequest, Code: "VALIDATION_ERROR", Message: msg}
 		}
 		return account.Summary{}, &BackendError{Status: http.StatusBadGateway, Code: "UPSTREAM_FAILURE", Message: "收件邮箱验证失败,请检查邮箱、授权码和 IMAP 配置"}
 	}
@@ -303,35 +318,53 @@ func (b *managerBackend) ListInbox(q InboxQuery) (InboxResult, error) {
 	return InboxResult{AccountID: q.AccountID, Count: len(messages), Messages: messages, Method: "web_api"}, nil
 }
 
-func (b *managerBackend) GetMessage(accountID string, uid uint32) (*mail.FullMessage, error) {
-	mc, err := b.mgr.MailClient(accountID)
+// GetMessage 读取单封邮件正文。
+//
+// 与列表一致地走 IMAP 连接池:同账号的多个读信请求各占一条连接并行执行,
+// 复用长连接可以省掉每次 TLS + LOGIN 的开销。
+func (b *managerBackend) GetMessage(accountID string, uid uint32, opts mail.MessageOptions) (*mail.FullMessage, error) {
+	var message *mail.FullMessage
+	err := b.mgr.WithMailClient(accountID, func(mc *mail.Client) error {
+		var inner error
+		message, inner = mc.GetFull(uid, opts)
+		return inner
+	})
 	if err != nil {
-		return nil, mapAccountErr(err)
-	}
-	if err := mc.Connect(); err != nil {
-		return nil, &BackendError{Status: http.StatusBadGateway, Code: "UPSTREAM_FAILURE", Message: "读取邮件失败"}
-	}
-	defer mc.Disconnect()
-	message, err := mc.GetFull(uid)
-	if err != nil {
+		if isMailCredentialErr(err) {
+			return nil, mapAccountErr(err)
+		}
 		return nil, &BackendError{Status: http.StatusBadGateway, Code: "UPSTREAM_FAILURE", Message: "读取邮件详情失败"}
 	}
 	return message, nil
 }
 
+// DeleteMessage 删除邮件,同样复用池中的长连接。
 func (b *managerBackend) DeleteMessage(accountID string, uid uint32) error {
-	mc, err := b.mgr.MailClient(accountID)
+	err := b.mgr.WithMailClient(accountID, func(mc *mail.Client) error {
+		return mc.Delete(uid)
+	})
 	if err != nil {
-		return mapAccountErr(err)
-	}
-	if err := mc.Connect(); err != nil {
-		return &BackendError{Status: http.StatusBadGateway, Code: "UPSTREAM_FAILURE", Message: "删除邮件失败"}
-	}
-	defer mc.Disconnect()
-	if err := mc.Delete(uid); err != nil {
+		if isMailCredentialErr(err) {
+			return mapAccountErr(err)
+		}
 		return &BackendError{Status: http.StatusBadGateway, Code: "UPSTREAM_FAILURE", Message: "删除邮件失败"}
 	}
 	return nil
+}
+
+// isMailCredentialErr 判断是否为账号凭据/配置类错误。
+// 这类问题属于调用方配置错误(400),其余归为上游失败(502)。
+func isMailCredentialErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	for _, key := range []string{"账号不存在", "未设置", "未配置", "无法使用", "凭据为空", "凭据不完整"} {
+		if strings.Contains(msg, key) {
+			return true
+		}
+	}
+	return false
 }
 
 // Reload 重新加载配置。

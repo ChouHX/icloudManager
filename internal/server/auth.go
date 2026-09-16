@@ -56,13 +56,14 @@ func setSessionCookie(c *gin.Context, sessionID string, expiresAt time.Time, sec
 	})
 }
 
-// clearSessionCookie 清除会话 Cookie。
-func clearSessionCookie(c *gin.Context) {
+// clearSessionCookie 清除会话 Cookie(属性与 setSessionCookie 保持一致)。
+func clearSessionCookie(c *gin.Context, secure bool) {
 	http.SetCookie(c.Writer, &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   secure,
 		SameSite: http.SameSiteStrictMode,
 		MaxAge:   -1,
 	})
@@ -132,6 +133,6 @@ func (s *Server) handleLogout(c *gin.Context) {
 	if sessionID != "" {
 		s.auth.Logout(sessionID)
 	}
-	clearSessionCookie(c)
+	clearSessionCookie(c, s.cfg.SecureCookie)
 	ok(c, gin.H{"logged_out": true})
 }

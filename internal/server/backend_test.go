@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -17,10 +19,12 @@ import (
 
 // fakeBackend 是测试用内存 Backend,记录调用,不访问网络。
 type fakeBackend struct {
-	accounts []account.Summary
-	aliases  []hme.Alias
-	inbox    InboxResult
-	created  *hme.CreateResult
+	// accounts 可能被并发读取(后台任务循环会调 ListAccounts),必须加锁访问
+	accountsMu sync.RWMutex
+	accounts   []account.Summary
+	aliases    []hme.Alias
+	inbox      InboxResult
+	created    *hme.CreateResult
 
 	addedInput   account.AddAccountInput
 	updatedID    string
@@ -43,9 +47,29 @@ type fakeBackend struct {
 	aliasDeleteErr error
 	listInboxQuery InboxQuery
 	reloadCount    int
+
+	// 多账号任务会并发调用,计数器必须是原子的
+	createAliasCalls atomic.Int64
+	// 记录最近一次 GetMessage 的选项,用于断言查询参数的传递
+	lastMessageOpts mail.MessageOptions
+
+	// 可选的行为注入:设置后优先于字段,便于测试精确控制每一轮结果
+	createAliasFn func(accountID, label string) (*hme.CreateResult, error)
+	listAliasesFn func(accountID string) ([]hme.Alias, error)
 }
 
-func (f *fakeBackend) ListAccounts() []account.Summary { return f.accounts }
+func (f *fakeBackend) ListAccounts() []account.Summary {
+	f.accountsMu.RLock()
+	defer f.accountsMu.RUnlock()
+	return f.accounts
+}
+
+// setAccounts 并发安全地替换账号列表(测试中改账号时使用)。
+func (f *fakeBackend) setAccounts(list []account.Summary) {
+	f.accountsMu.Lock()
+	defer f.accountsMu.Unlock()
+	f.accounts = list
+}
 
 func (f *fakeBackend) AddAccount(in account.AddAccountInput) (account.Summary, error) {
 	f.addedInput = in
@@ -108,10 +132,21 @@ func (f *fakeBackend) RemoveAccount(id string) bool {
 }
 
 func (f *fakeBackend) CreateAlias(accountID, label string) (*hme.CreateResult, error) {
+	f.createAliasCalls.Add(1)
+	if f.createAliasFn != nil {
+		return f.createAliasFn(accountID, label)
+	}
+	if f.created == nil {
+		// 默认给一个合成结果:不让替身返回 (nil, nil) 这种真实实现不会出现的组合
+		return &hme.CreateResult{Email: "auto@icloud.com", Label: label}, nil
+	}
 	return f.created, nil
 }
 
 func (f *fakeBackend) ListAliases(accountID string) ([]hme.Alias, error) {
+	if f.listAliasesFn != nil {
+		return f.listAliasesFn(accountID)
+	}
 	return f.aliases, nil
 }
 
@@ -130,7 +165,8 @@ func (f *fakeBackend) ListInbox(q InboxQuery) (InboxResult, error) {
 	return f.inbox, nil
 }
 
-func (f *fakeBackend) GetMessage(accountID string, uid uint32) (*mail.FullMessage, error) {
+func (f *fakeBackend) GetMessage(accountID string, uid uint32, opts mail.MessageOptions) (*mail.FullMessage, error) {
+	f.lastMessageOpts = opts
 	return &mail.FullMessage{Message: mail.Message{ID: fmt.Sprint(uid)}}, nil
 }
 
@@ -142,13 +178,13 @@ func (f *fakeBackend) Reload() error {
 }
 
 // newTestServer 构造带固定密码与 fake backend 的测试 Server。
-func newTestServer(f *fakeBackend) (*Server, *httptest.Server) {
+func newTestServer(t *testing.T, f *fakeBackend) (*Server, *httptest.Server) {
 	cfg := Config{
 		Debug:         false,
 		AdminPassword: "admin-pass-2026-strong",
 		SessionTTL:    12 * time.Hour,
 	}
-	s := newWithBackend(f, cfg)
+	s := mustServer(t, f, cfg)
 	ts := httptest.NewServer(s.Handler())
 	return s, ts
 }

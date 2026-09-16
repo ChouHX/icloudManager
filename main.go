@@ -18,10 +18,12 @@
 //	ICLOUD_HME_ADMIN_PASSWORD      管理员密码,至少 8 字符(进程启动后从环境清除)
 //	ICLOUD_HME_SESSION_TTL         会话有效期,默认 12h,范围 15m-168h
 //	ICLOUD_HME_SECURE_COOKIE       TLS 反向代理部署时设为 true
+//	ICLOUD_HME_IMAP_POOL_SIZE      每账号 IMAP 并发连接数,默认 10(范围 1-50)
 package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -91,7 +93,7 @@ func parseSessionTTL(raw string) (time.Duration, error) {
 		return 0, err
 	}
 	if d < 15*time.Minute || d > 168*time.Hour {
-		return 0, err
+		return 0, fmt.Errorf("超出允许范围 15m-168h: %s", raw)
 	}
 	return d, nil
 }
