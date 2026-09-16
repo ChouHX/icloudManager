@@ -4,7 +4,11 @@ import (
 	stdhtml "html"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
+
+// maxMailHTMLBytes 限制单封邮件用于渲染的 HTML 体积。
+const maxMailHTMLBytes = 1 << 20
 
 var (
 	htmlTagRE        = regexp.MustCompile(`(?s)<[^>]+>`)
@@ -16,7 +20,75 @@ var (
 
 	cssSignalRE      = regexp.MustCompile(`(?i)(@font-face|@media|@import|@supports|@keyframes|(^|[\s;{])(-webkit-|-moz-|-ms-|mso-)[\w-]*|(^|[\s;{])(font-family|text-size-adjust|border-collapse|mso-table-[\w-]+)\s*:)`)
 	cssDeclarationRE = regexp.MustCompile(`(?i)(^|[;{])\s*[-a-z_][\w-]*\s*:\s*[^;{}]+`)
+
+	// 邮件 HTML 清理规则(渲染前的纵深防御,见 sanitizeMailHTML)
+	mailScriptBlockRE = regexp.MustCompile(`(?is)<script\b[^>]*>.*?</script\s*>|<script\b[^>]*/?>`)
+	mailFrameBlockRE  = regexp.MustCompile(`(?is)<(iframe|frame|frameset|object|embed|applet|portal)\b[^>]*>.*?</(iframe|frame|frameset|object|applet)\s*>|<(iframe|frame|frameset|object|embed|applet|portal)\b[^>]*/?>`)
+	mailBaseMetaRE    = regexp.MustCompile(`(?is)<base\b[^>]*>|<meta\b[^>]*http-equiv\s*=\s*["']?\s*refresh[^>]*>`)
+	mailEventAttrRE   = regexp.MustCompile(`(?i)\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)`)
+	mailURLAttrRE     = regexp.MustCompile(`(?i)\b(href|src|xlink:href|action|formaction|background)\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))`)
+	mailCtrlRE        = regexp.MustCompile(`[\x00-\x08\x0b\x0c\x0e-\x1f]`)
 )
+
+// sanitizeMailHTML 清理邮件 HTML,使其可以放进 sandbox iframe 安全渲染。
+//
+// 这是 iframe sandbox 之外的纵深防御:移除可执行内容(script、object、embed)、
+// 会劫持页面导航的标签(base、meta refresh)、内联事件属性(on*)以及
+// javascript:/vbscript: 之类的 URL 协议。邮件自身的 <style> 保留,
+// 它只在 iframe 内起作用,同时也决定邮件的排版还原度。
+func sanitizeMailHTML(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	out := mailCtrlRE.ReplaceAllString(raw, "")
+	out = mailScriptBlockRE.ReplaceAllString(out, "")
+	out = mailFrameBlockRE.ReplaceAllString(out, "")
+	out = mailBaseMetaRE.ReplaceAllString(out, "")
+	out = mailEventAttrRE.ReplaceAllString(out, "")
+	out = mailURLAttrRE.ReplaceAllStringFunc(out, neutralizeDangerousURL)
+
+	if len(out) > maxMailHTMLBytes {
+		out = truncateUTF8(out, maxMailHTMLBytes) + "\n<!-- 正文过长,已截断 -->"
+	}
+	return out
+}
+
+// neutralizeDangerousURL 把危险协议的属性值替换为 "#",保留原有引号风格。
+func neutralizeDangerousURL(match string) string {
+	eq := strings.IndexByte(match, '=')
+	if eq < 0 {
+		return match
+	}
+	name := strings.TrimSpace(match[:eq])
+	raw := strings.TrimSpace(match[eq+1:])
+
+	quote := ""
+	value := raw
+	if len(raw) >= 2 && (raw[0] == '"' || raw[0] == '\'') {
+		quote = string(raw[0])
+		value = strings.TrimSuffix(raw[1:], quote)
+	}
+
+	lower := strings.ToLower(strings.TrimSpace(value))
+	if strings.HasPrefix(lower, "javascript:") ||
+		strings.HasPrefix(lower, "vbscript:") ||
+		(strings.HasPrefix(lower, "data:") && !strings.HasPrefix(lower, "data:image/")) {
+		return name + "=" + quote + "#" + quote
+	}
+	return match
+}
+
+// truncateUTF8 按字节上限截断,且不切断多字节字符。
+func truncateUTF8(s string, limit int) string {
+	if len(s) <= limit {
+		return s
+	}
+	cut := s[:limit]
+	for len(cut) > 0 && !utf8.ValidString(cut) {
+		cut = cut[:len(cut)-1]
+	}
+	return cut
+}
 
 // sanitizePreview converts an email preview to readable text and removes
 // presentation-only HTML/CSS that mail clients commonly include.

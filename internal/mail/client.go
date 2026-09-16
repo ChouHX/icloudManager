@@ -5,23 +5,28 @@
 package mail
 
 import (
+	"bytes"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"mime"
-	"mime/quotedprintable"
-	"net/mail"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/client"
+	message "github.com/emersion/go-message"
 	"github.com/emersion/go-message/charset"
+	esmail "github.com/emersion/go-message/mail"
 )
 
 const (
 	IMAPServer = "imap.mail.me.com"
 	IMAPPort   = 993
+
+	// maxRawMessageBytes 是单封邮件原始报文的读取上限(超出即截断)。
+	maxRawMessageBytes = 10 << 20
 )
 
 // Message 是一封邮件的摘要信息。
@@ -34,10 +39,31 @@ type Message struct {
 	Preview string `json:"preview"`
 }
 
+// MessageOptions 控制单封邮件返回哪些额外内容。
+type MessageOptions struct {
+	// Sanitize 额外返回清理后的 HTML(移除 script / 事件属性 / javascript: 协议)。
+	// 调用方若要自己渲染,建议用这份;需要原始数据则用 BodyHTML。
+	Sanitize bool
+	// IncludeRaw 额外返回完整 RFC822 报文(base64),含全部头部与 MIME 部分。
+	IncludeRaw bool
+}
+
 // FullMessage 是一封邮件的完整内容(含正文)。
+//
+// Body 始终是可读纯文本(供复制、OTP 提取与无 HTML 时展示);
+// BodyHTML 是**未经清理**的原始 HTML —— 服务端不做加工,把处理权交给调用方。
+// 需要清理版或完整原始报文时,分别用 MessageOptions.Sanitize / IncludeRaw 索取。
 type FullMessage struct {
 	Message
-	Body        string `json:"body"`
+	Body string `json:"body"`
+	// BodyHTML 邮件自带的原始 HTML(未清理)
+	BodyHTML string `json:"body_html,omitempty"`
+	// BodyHTMLSanitized 清理后的 HTML,仅在请求 sanitize 时出现
+	BodyHTMLSanitized string `json:"body_html_sanitized,omitempty"`
+	// RawMessage 完整 RFC822 报文的 base64,仅在请求 raw 时出现
+	RawMessage string `json:"raw_message,omitempty"`
+	// RawSize 原始报文字节数(截断前)
+	RawSize     int    `json:"raw_size,omitempty"`
 	ContentType string `json:"content_type"`
 }
 
@@ -165,9 +191,10 @@ func (c *Client) ListInbox(limit int, days int) ([]Message, error) {
 	var out []Message
 	for msg := range messages {
 		m := toMessageWithBody(msg)
-		// days 过滤
+		// days 过滤:只保留近 days 天内的邮件。
+		// 时间解析失败时保留,避免因个别邮件格式异常而整批丢失。
 		if days > 0 {
-			if t, err := time.Parse(time.RFC1123Z, m.Date); err == nil {
+			if t, err := parseMessageDate(m.Date); err == nil {
 				if time.Since(t) > time.Duration(days)*24*time.Hour {
 					continue
 				}
@@ -178,8 +205,47 @@ func (c *Client) ListInbox(limit int, days int) ([]Message, error) {
 	if err := <-done; err != nil {
 		return nil, err
 	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].Date > out[j].Date })
+	sortMessagesDesc(out)
 	return out, nil
+}
+
+// parseMessageDate 解析邮件时间。
+//
+// toMessage 把 Envelope 时间格式化为 RFC3339;部分服务端也可能给出
+// RFC1123Z/RFC1123,这里一并兼容。此前只按 RFC1123Z 解析会导致
+// days 过滤被静默跳过,因此两种格式都必须支持。
+func parseMessageDate(raw string) (time.Time, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}, fmt.Errorf("邮件时间为空")
+	}
+	for _, layout := range []string{time.RFC3339, time.RFC1123Z, time.RFC1123} {
+		if t, err := time.Parse(layout, raw); err == nil {
+			return t, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("无法解析邮件时间: %q", raw)
+}
+
+// sortMessagesDesc 按时间倒序排序(新→旧)。
+//
+// 时间可解析时按真实时间比较,避免不同时区偏移下字符串比较的错序;
+// 时间无法解析的邮件统一排到末尾,而不是按字符串乱序出现在列表顶部。
+func sortMessagesDesc(messages []Message) {
+	sort.SliceStable(messages, func(i, j int) bool {
+		left, leftErr := parseMessageDate(messages[i].Date)
+		right, rightErr := parseMessageDate(messages[j].Date)
+		if leftErr != nil && rightErr != nil {
+			return messages[i].Date > messages[j].Date
+		}
+		if leftErr != nil {
+			return false
+		}
+		if rightErr != nil {
+			return true
+		}
+		return left.After(right)
+	})
 }
 
 // FindByRecipient 查找发给指定隐私邮箱别名的最近 limit 封邮件(新→旧)。
@@ -374,7 +440,9 @@ func (c *Client) fetchByUIDs(uids []uint32, limit int) ([]Message, error) {
 }
 
 // GetFull 获取单封邮件的完整内容(含正文)。
-func (c *Client) GetFull(uid uint32) (*FullMessage, error) {
+//
+// opts 决定是否额外返回清理后的 HTML 与完整原始报文。
+func (c *Client) GetFull(uid uint32, opts MessageOptions) (*FullMessage, error) {
 	if c.cli == nil {
 		return nil, fmt.Errorf("未连接")
 	}
@@ -401,12 +469,27 @@ func (c *Client) GetFull(uid uint32) (*FullMessage, error) {
 	}
 
 	full := &FullMessage{Message: toMessage(msg)}
-	// 解析正文
 	if r := msg.GetBody(&imap.BodySectionName{}); r != nil {
-		if em, err := mail.ReadMessage(r); err == nil {
-			body, _ := readBody(em)
-			full.Body = body
-			full.ContentType = em.Header.Get("Content-Type")
+		// 一次性读入原始报文:正文解析与原始数据导出共用同一份字节
+		raw, err := io.ReadAll(io.LimitReader(r, maxRawMessageBytes+1))
+		if err != nil {
+			return nil, err
+		}
+		if len(raw) > maxRawMessageBytes {
+			raw = raw[:maxRawMessageBytes]
+		}
+
+		parts := buildBody(bytes.NewReader(raw))
+		full.Body = parts.Plain
+		full.BodyHTML = truncateUTF8(parts.HTML, maxMailHTMLBytes)
+		full.ContentType = parts.contentType()
+
+		if opts.Sanitize {
+			full.BodyHTMLSanitized = sanitizeMailHTML(parts.HTML)
+		}
+		if opts.IncludeRaw {
+			full.RawMessage = base64.StdEncoding.EncodeToString(raw)
+			full.RawSize = len(raw)
 		}
 	}
 	return full, nil
@@ -474,15 +557,12 @@ func toMessageWithBody(msg *imap.Message) Message {
 		if r == nil {
 			continue
 		}
-		em, err := mail.ReadMessage(r)
-		if err != nil {
+		parts := buildBody(r)
+		if parts.Plain == "" && parts.HTML == "" {
 			continue
 		}
-		body, err := readBody(em)
-		if err != nil {
-			continue
-		}
-		m.Preview = strings.TrimSpace(body)
+		// 列表摘要固定用纯文本
+		m.Preview = parts.Plain
 		break
 	}
 	return m
@@ -501,26 +581,84 @@ func decodeHeader(s string) string {
 	return out
 }
 
-// readBody 读取邮件正文,优先 text/plain,其次从 HTML 提取纯文本。
-func readBody(msg *mail.Message) (string, error) {
-	ct := msg.Header.Get("Content-Type")
-	if strings.HasPrefix(ct, "text/html") {
-		raw, _ := io.ReadAll(msg.Body)
-		// quoted-printable 解码
-		if strings.Contains(msg.Header.Get("Content-Transfer-Encoding"), "quoted-printable") {
-			r := quotedprintable.NewReader(strings.NewReader(string(raw)))
-			raw, _ = io.ReadAll(r)
+// bodyParts 是一封邮件解析出的正文各部分。
+type bodyParts struct {
+	// Plain 是可读纯文本:text/plain 部分,或由 HTML 转换得到
+	Plain string
+	// HTML 是清理后的原始 HTML,供界面在 sandbox iframe 中渲染
+	HTML string
+	// TopType 是顶层 Content-Type,仅在整封邮件没有可读正文时用于说明原因
+	TopType string
+}
+
+// contentType 返回界面应采用的渲染类型。
+func (p bodyParts) contentType() string {
+	switch {
+	case p.HTML != "":
+		return "text/html"
+	case p.Plain != "":
+		return "text/plain"
+	default:
+		return p.TopType
+	}
+}
+
+// buildBody 从完整 RFC822 报文提取正文。
+//
+// 邮件正文常见结构是 multipart/mixed 或 multipart/alternative 嵌套,直接按顶层
+// Content-Type 读取会把 MIME 边界当成正文。这里用 go-message 的 mail.Reader
+// 遍历所有内联部分:它会递归展开 multipart、解码
+// Content-Transfer-Encoding(base64 / quoted-printable)并按 charset 转码。
+//
+// 附件一律跳过。text/plain 与 text/html 都会收集:HTML 原样保留(不清理),
+// 纯文本用于列表摘要、复制与 OTP 提取;只有 HTML 的邮件会由 HTML 反推纯文本。
+func buildBody(raw io.Reader) bodyParts {
+	reader, err := esmail.CreateReader(raw)
+	if err != nil && !message.IsUnknownCharset(err) {
+		return bodyParts{}
+	}
+	defer reader.Close()
+
+	parts := bodyParts{TopType: reader.Header.Get("Content-Type")}
+
+	var plain, htmlPart string
+	for {
+		part, err := reader.NextPart()
+		if err == io.EOF {
+			break
 		}
-		return sanitizePreview(string(raw)), nil
+		if err != nil && !message.IsUnknownCharset(err) {
+			break
+		}
+
+		inline, ok := part.Header.(*esmail.InlineHeader)
+		if !ok {
+			// 附件:必须读完才能继续遍历,但内容不参与正文
+			_, _ = io.Copy(io.Discard, part.Body)
+			continue
+		}
+
+		mediaType, _, _ := inline.ContentType()
+		switch {
+		case strings.EqualFold(mediaType, "text/plain") && plain == "":
+			data, _ := io.ReadAll(part.Body)
+			plain = sanitizePlainPreview(string(data))
+		case strings.EqualFold(mediaType, "text/html") && htmlPart == "":
+			data, _ := io.ReadAll(part.Body)
+			htmlPart = string(data) // 原样保留,清理由调用方按需决定
+		default:
+			_, _ = io.Copy(io.Discard, part.Body)
+		}
 	}
-	// 默认当 text/plain
-	raw, err := io.ReadAll(msg.Body)
-	if err != nil {
-		return "", err
+
+	parts.HTML = htmlPart
+	if htmlPart != "" {
+		// HTML 邮件的纯文本视图:剥标签与样式后的可读文本
+		parts.Plain = sanitizePreview(htmlPart)
 	}
-	if strings.Contains(msg.Header.Get("Content-Transfer-Encoding"), "quoted-printable") {
-		r := quotedprintable.NewReader(strings.NewReader(string(raw)))
-		raw, _ = io.ReadAll(r)
+	if plain != "" {
+		// 邮件自带 text/plain 时以它为准(通常是发件人给出的最准确文本)
+		parts.Plain = plain
 	}
-	return sanitizePlainPreview(string(raw)), nil
+	return parts
 }
