@@ -5,15 +5,18 @@
 #   docker compose up -d --build
 #   docker compose logs -f
 #
-# 默认从当前目录构建镜像;若想直接用 CI 产出的镜像,把 build 段换成:
-#   image: ghcr.io/chouhx/icloudmanager:latest
+# 默认直接拉取 CI 构建并推送到 GHCR 的镜像(推 main 即自动构建)。
+# 想在本地从源码构建,把 image 换成:
+#   build:
+#     context: .
+#     dockerfile: Dockerfile
 
 services:
   icloud-hme:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    # image: ghcr.io/chouhx/icloudmanager:latest
+    image: ghcr.io/chouhx/icloudmanager:latest
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
     container_name: icloud-hme
     restart: unless-stopped
 
