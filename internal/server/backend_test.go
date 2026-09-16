@@ -52,6 +52,8 @@ type fakeBackend struct {
 	createAliasCalls atomic.Int64
 	// 记录最近一次 GetMessage 的选项,用于断言查询参数的传递
 	lastMessageOpts mail.MessageOptions
+	// fullMessage 非空时由 GetMessage 返回,便于构造越权等场景
+	fullMessage *mail.FullMessage
 
 	// 可选的行为注入:设置后优先于字段,便于测试精确控制每一轮结果
 	createAliasFn func(accountID, label string) (*hme.CreateResult, error)
@@ -167,6 +169,9 @@ func (f *fakeBackend) ListInbox(q InboxQuery) (InboxResult, error) {
 
 func (f *fakeBackend) GetMessage(accountID string, uid uint32, opts mail.MessageOptions) (*mail.FullMessage, error) {
 	f.lastMessageOpts = opts
+	if f.fullMessage != nil {
+		return f.fullMessage, nil
+	}
 	return &mail.FullMessage{Message: mail.Message{ID: fmt.Sprint(uid)}}, nil
 }
 

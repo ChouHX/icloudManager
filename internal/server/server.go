@@ -16,6 +16,8 @@ import (
 	"errors"
 	"io/fs"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -24,7 +26,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"icloud-hme/internal/account"
 	"icloud-hme/internal/auth"
+	"icloud-hme/internal/hme"
 	"icloud-hme/internal/mail"
+	"icloud-hme/internal/share"
 	"icloud-hme/internal/webui"
 )
 
@@ -34,6 +38,8 @@ type Config struct {
 	AdminPassword string
 	SessionTTL    time.Duration
 	SecureCookie  bool
+	// DataDir 用于存放取件链接等运行数据(accounts.json 同目录)
+	DataDir string
 }
 
 // Server 封装 Gin 引擎、账号后端与认证。
@@ -43,6 +49,9 @@ type Server struct {
 	limiter *auth.Limiter
 	cfg     Config
 	r       *gin.Engine
+
+	// 取件链接(见 share_handlers.go)
+	share *share.Store
 
 	// 后台自动建满任务(全局单任务,见 autocreate.go)
 	autoMu sync.Mutex
@@ -72,9 +81,19 @@ func newWithBackend(be Backend, cfg Config) (*Server, error) {
 	if !cfg.Debug {
 		gin.SetMode(gin.ReleaseMode)
 	}
+	// 未指定数据目录时退到临时目录,避免把运行数据写进进程当前目录
+	dataDir := cfg.DataDir
+	if dataDir == "" {
+		dataDir = filepath.Join(os.TempDir(), "icloud-hme")
+	}
+	shareStore, err := share.NewStore(dataDir)
+	if err != nil {
+		return nil, err
+	}
 	s := &Server{
 		be:      be,
 		auth:    authManager,
+		share:   shareStore,
 		limiter: auth.NewLimiter(nil, 15*time.Minute, 5, 10000),
 		cfg:     cfg,
 	}
@@ -101,6 +120,10 @@ func (s *Server) register() {
 		// ===== 认证(公开) =====
 		api.POST("/auth/login", s.handleLogin)
 		api.GET("/auth/session", s.handleSession)
+
+		// ===== 公开:凭取件链接的 token 只读取件(无需会话) =====
+		api.GET("/share/:token/inbox", s.shareInboxHandler)
+		api.GET("/share/:token/inbox/:message_id", s.shareMessageHandler)
 
 		// ===== 受保护路由:统一 requireSession =====
 		authed := api.Group("")
@@ -132,6 +155,10 @@ func (s *Server) register() {
 			authed.POST("/aliases/:id/deactivate", csrfCheck(s.auth), s.deactivateAliasHandler)
 			authed.POST("/aliases/:id/reactivate", csrfCheck(s.auth), s.reactivateAliasHandler)
 			authed.DELETE("/aliases/:id", csrfCheck(s.auth), s.deleteAliasHandler)
+
+			// ===== 别名取件链接 =====
+			authed.POST("/aliases/:id/share-link", csrfCheck(s.auth), s.createShareLinkHandler)
+			authed.DELETE("/aliases/:id/share-link", csrfCheck(s.auth), s.revokeShareLinkHandler)
 
 			// ===== 后台任务:自动建满别名 =====
 			authed.GET("/autocreate", s.autoCreateStatusHandler)
@@ -315,11 +342,28 @@ func (s *Server) listAliasesHandler(c *gin.Context) {
 		backendFail(c, err)
 		return
 	}
+
+	// 附带该别名当前的取件链接 token(没有则不出现该字段)
+	items := make([]aliasWithShare, 0, len(aliases))
+	for _, alias := range aliases {
+		item := aliasWithShare{Alias: alias}
+		if link, ok := s.share.GetByAlias(accountID, alias.Email); ok {
+			item.ShareToken = link.Token
+		}
+		items = append(items, item)
+	}
+
 	ok(c, gin.H{
 		"account_id": accountID,
-		"count":      len(aliases),
-		"aliases":    aliases,
+		"count":      len(items),
+		"aliases":    items,
 	})
+}
+
+// aliasWithShare 在别名基础上附加取件链接 token。
+type aliasWithShare struct {
+	hme.Alias
+	ShareToken string `json:"shareToken,omitempty"`
 }
 
 type aliasActionReq struct {

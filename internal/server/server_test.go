@@ -12,6 +12,10 @@ import (
 // mustServer 构造测试用 Server,初始化失败直接终止测试。
 func mustServer(t *testing.T, be Backend, cfg Config) *Server {
 	t.Helper()
+	// 每个测试用独立的数据目录,避免取件链接等状态相互串扰
+	if cfg.DataDir == "" {
+		cfg.DataDir = t.TempDir()
+	}
 	s, err := newWithBackend(be, cfg)
 	if err != nil {
 		t.Fatalf("初始化测试服务失败: %v", err)

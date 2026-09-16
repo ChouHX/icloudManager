@@ -69,6 +69,7 @@ func main() {
 		AdminPassword: adminPassword,
 		SessionTTL:    sessionTTL,
 		SecureCookie:  secureCookie,
+		DataDir:       abs,
 	})
 	if err != nil {
 		log.Fatalf("初始化服务失败: %v", err)
