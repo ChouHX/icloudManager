@@ -658,6 +658,31 @@ X-CSRF-Token: <token>
 
 重新读取 `accounts.json`，响应 `{ "message": "配置已重新加载" }`。手动编辑配置文件后调用即可，无需重启进程。
 
+### 5.11 账号检测
+
+```http
+POST /api/accounts/:id/check
+X-CSRF-Token: <token>
+```
+
+无需请求体。重新验证已配置的 Cookie、App 专用密码和外部收件邮箱；未配置的项目不检测。IMAP 使用新连接登录并以只读方式打开收件箱，不读取或修改邮件。
+
+响应 `data` 包含 `account`（最新账号安全摘要）和 `checks` 数组，每项包含 `name`、`passed`、`message`：
+
+```json
+{
+  "name": "Cookie",
+  "passed": true,
+  "message": "iCloud 会话有效"
+}
+```
+
+- 全部通过：状态更新为 `active`，刷新 `last_validated`。
+- 任一失败：状态更新为 `error`，保留上次成功验证时间，通过 `checks` 查看失败项目。检测正常完成仍返回 HTTP 200 / `success: true`，不回显上游错误或凭据。
+- 未配置任何凭据：状态为 `pending`，`checks` 为 `[]`。
+- 检测期间凭据发生变更：`409 ACCOUNT_CHANGED`，丢弃旧检测结果并提示重新检测。
+- 账号不存在：`404 ACCOUNT_NOT_FOUND`。
+
 ---
 
 ## 6. 已知限制

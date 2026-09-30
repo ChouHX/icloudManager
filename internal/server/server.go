@@ -140,6 +140,7 @@ func (s *Server) register() {
 			authed.POST("/accounts/:id/password", csrfCheck(s.auth), s.setAppPasswordHandler)
 			authed.PUT("/accounts/:id/mailbox", csrfCheck(s.auth), s.setMailboxHandler)
 			authed.POST("/accounts/:id/login", csrfCheck(s.auth), s.loginAccountHandler)
+			authed.POST("/accounts/:id/check", csrfCheck(s.auth), s.checkAccountHandler)
 			authed.DELETE("/accounts/:id", csrfCheck(s.auth), s.removeAccountHandler)
 
 			// ===== 核心接口 1: 创建邮箱 =====

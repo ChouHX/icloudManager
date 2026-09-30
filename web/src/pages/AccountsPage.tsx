@@ -22,12 +22,14 @@ import {
   InboxOutlined,
   KeyOutlined,
   MailOutlined,
+  LoadingOutlined,
   PlusOutlined,
+  SafetyCertificateOutlined,
   SafetyOutlined,
 } from '@ant-design/icons'
 import { ApiError, request } from '../api/client'
 import { useAccounts } from '../api/hooks'
-import type { AccountSummary } from '../api/types'
+import type { AccountCheckResult, AccountSummary } from '../api/types'
 import { AccountFormModal, CredentialModal, ICloudLoginModal, MailboxModal } from '../components/AccountModals'
 
 const STATUS_META: Record<string, { text: string; color: string }> = {
@@ -44,6 +46,35 @@ export default function AccountsPage() {
   const [editing, setEditing] = useState<AccountSummary | null>(null)
   const [target, setTarget] = useState<AccountSummary | null>(null)
   const [mode, setMode] = useState<'cookies' | 'password' | 'proxy' | 'login' | 'mailbox' | null>(null)
+  const [checkingIds, setCheckingIds] = useState<string[]>([])
+
+  async function checkAccount(account: AccountSummary) {
+    if (checkingIds.includes(account.id)) return
+    setCheckingIds((ids) => [...ids, account.id])
+    try {
+      const result = await request<AccountCheckResult>(`/api/accounts/${encodeURIComponent(account.id)}/check`, { method: 'POST' })
+      const showResult = result.account.status === 'active' ? modal.success : result.account.status === 'error' ? modal.error : modal.info
+      showResult({
+        title: `账号检测：${account.name}`,
+        okText: '知道了',
+        content: result.checks.length ? (
+          <Space orientation="vertical" style={{ width: '100%' }}>
+            {result.checks.map((item) => (
+              <Alert key={item.name} type={item.passed ? 'success' : 'error'} showIcon title={item.name} description={item.message} />
+            ))}
+          </Space>
+        ) : '账号尚未配置凭据，请先配置 Cookie、App 专用密码或收件邮箱。',
+      })
+    } catch (err) {
+      modal.error({
+        title: `账号检测失败：${account.name}`,
+        content: err instanceof ApiError ? err.message : '网络连接失败，请检查服务状态',
+      })
+    } finally {
+      setCheckingIds((ids) => ids.filter((id) => id !== account.id))
+      reload()
+    }
+  }
 
   function openCredential(account: AccountSummary, next: typeof mode) {
     setTarget(account)
@@ -158,6 +189,13 @@ export default function AccountsPage() {
             trigger={['click']}
             menu={{
               items: [
+                {
+                  key: 'check',
+                  icon: checkingIds.includes(account.id) ? <LoadingOutlined /> : <SafetyCertificateOutlined />,
+                  label: checkingIds.includes(account.id) ? '检测中…' : '账号检测',
+                  disabled: checkingIds.includes(account.id),
+                },
+                { type: 'divider' },
                 { key: 'cookies', icon: <SafetyOutlined />, label: '更新 Cookie' },
                 { key: 'login', icon: <KeyOutlined />, label: 'iCloud 密码登录' },
                 { key: 'password', icon: <MailOutlined />, label: '设置 App 专用密码' },
@@ -167,6 +205,10 @@ export default function AccountsPage() {
                 { key: 'delete', icon: <DeleteOutlined />, label: '删除账号', danger: true },
               ],
               onClick: ({ key }) => {
+                if (key === 'check') {
+                  void checkAccount(account)
+                  return
+                }
                 if (key === 'delete') {
                   modal.confirm({
                     title: `删除账号「${account.name}」？`,
@@ -183,7 +225,7 @@ export default function AccountsPage() {
             }}
           >
             <Button type="link" size="small">
-              凭据配置 <DownOutlined />
+              {checkingIds.includes(account.id) ? <><LoadingOutlined /> 检测中…</> : <>凭据配置 <DownOutlined /></>}
             </Button>
           </Dropdown>
         </Space>

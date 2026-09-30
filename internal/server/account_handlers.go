@@ -199,6 +199,16 @@ func (s *Server) loginAccountHandler(c *gin.Context) {
 	ok(c, sum)
 }
 
+// checkAccountHandler 处理 POST /api/accounts/:id/check。
+func (s *Server) checkAccountHandler(c *gin.Context) {
+	result, err := s.be.CheckAccount(c.Param("id"))
+	if err != nil {
+		backendFail(c, err)
+		return
+	}
+	ok(c, result)
+}
+
 // removeAccountHandler 处理 DELETE /api/accounts/:id。
 func (s *Server) removeAccountHandler(c *gin.Context) {
 	id := c.Param("id")

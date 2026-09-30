@@ -50,6 +50,7 @@ type Backend interface {
 	SetAppPassword(string, string, string) (account.Summary, error)
 	SetMailbox(string, account.MailboxConfig) (account.Summary, error)
 	LoginAccount(string, string, string) (account.Summary, error)
+	CheckAccount(string) (account.CheckResult, error)
 	RemoveAccount(string) bool
 	CreateAlias(string, string) (*hme.CreateResult, error)
 	ListAliases(string) ([]hme.Alias, error)
@@ -200,6 +201,20 @@ func classifyLoginErr(err error) *BackendError {
 		return &BackendError{Status: http.StatusUnauthorized, Code: "UPSTREAM_UNAUTHORIZED", Message: "iCloud 会话失效,请更新 Cookie"}
 	}
 	return &BackendError{Status: http.StatusBadGateway, Code: "UPSTREAM_FAILURE", Message: "iCloud 登录失败,请稍后重试"}
+}
+
+func (b *managerBackend) CheckAccount(id string) (account.CheckResult, error) {
+	result, err := b.mgr.CheckAccount(id)
+	if err != nil {
+		if errors.Is(err, account.ErrCheckCredentialsChanged) {
+			return account.CheckResult{}, &BackendError{Status: http.StatusConflict, Code: "ACCOUNT_CHANGED", Message: err.Error()}
+		}
+		if strings.Contains(err.Error(), "账号不存在") {
+			return account.CheckResult{}, &BackendError{Status: http.StatusNotFound, Code: "ACCOUNT_NOT_FOUND", Message: "账号不存在"}
+		}
+		return account.CheckResult{}, &BackendError{Status: http.StatusInternalServerError, Code: "INTERNAL_ERROR", Message: "保存账号检测结果失败"}
+	}
+	return result, nil
 }
 
 // RemoveAccount 删除账号。

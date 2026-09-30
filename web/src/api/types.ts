@@ -36,6 +36,11 @@ export interface MailboxSummary {
   imap_port: number
 }
 
+export interface AccountCheckResult {
+  account: AccountSummary
+  checks: { name: string; passed: boolean; message: string }[]
+}
+
 /** HME 别名(iCloud 返回字段风格为 camelCase) */
 export interface Alias {
   email: string

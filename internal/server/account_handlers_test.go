@@ -13,6 +13,75 @@ import (
 	"icloud-hme/internal/account"
 )
 
+// TestCheckAccountEndpoint 验证检测接口的认证、CSRF 和结果格式。
+func TestCheckAccountEndpoint(t *testing.T) {
+	f := &fakeBackend{checkResult: account.CheckResult{
+		Account: account.Summary{ID: "acc_1", Name: "主号", Status: "error"},
+		Checks:  []account.CheckItem{{Name: "Cookie", Passed: false, Message: "Cookie 检测失败"}},
+	}}
+	_, ts := newTestServer(t, f)
+	defer ts.Close()
+	sess, csrf := login(t, ts, "admin-pass-2026-strong")
+	for _, tc := range []struct {
+		name          string
+		session, csrf bool
+		status        int
+	}{
+		{"未登录", false, false, http.StatusUnauthorized},
+		{"缺少 CSRF", true, false, http.StatusForbidden},
+		{"检测完成", true, true, http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := authedReq(t, ts, "POST", "/api/accounts/acc_1/check", "")
+			if tc.session {
+				req.AddCookie(&http.Cookie{Name: "hme_session", Value: sess})
+			}
+			if tc.csrf {
+				req.Header.Set("X-CSRF-Token", csrf)
+			}
+			status, body, _ := do(t, req)
+			if status != tc.status {
+				t.Fatalf("want %d, got %d: %s", tc.status, status, body)
+			}
+			if status == http.StatusOK {
+				if f.checkedID != "acc_1" || !strings.Contains(body, `"passed":false`) {
+					t.Fatalf("unexpected result: %s", body)
+				}
+			} else if f.checkedID != "" {
+				t.Fatal("未授权请求触发了检测")
+			}
+		})
+	}
+}
+
+func TestCheckAccountManagerEndpoint(t *testing.T) {
+	mgr, err := account.NewManager(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	acc, err := mgr.AddAccountWithInput(account.AddAccountInput{Name: "待配置账号", ICloudEmail: "owner@icloud.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := mustServer(t, &managerBackend{mgr: mgr}, Config{AdminPassword: "admin-pass-2026-strong"})
+	ts := httptest.NewServer(s.Handler())
+	defer ts.Close()
+	sess, csrf := login(t, ts, "admin-pass-2026-strong")
+	for _, id := range []string{acc.ID, "missing"} {
+		req := authedReq(t, ts, "POST", "/api/accounts/"+id+"/check", "")
+		req.AddCookie(&http.Cookie{Name: "hme_session", Value: sess})
+		req.Header.Set("X-CSRF-Token", csrf)
+		status, body, _ := do(t, req)
+		if id == "missing" {
+			if status != http.StatusNotFound || !strings.Contains(body, `"code":"ACCOUNT_NOT_FOUND"`) {
+				t.Fatalf("unexpected missing account response: %d %s", status, body)
+			}
+		} else if status != http.StatusOK || !strings.Contains(body, `"status":"pending"`) || !strings.Contains(body, `"checks":[]`) {
+			t.Fatalf("unexpected pending account response: %d %s", status, body)
+		}
+	}
+}
+
 // writeSecretAccounts 把含秘密的账号写入测试数据目录。
 func writeSecretAccounts(t *testing.T, dir string) {
 	t.Helper()

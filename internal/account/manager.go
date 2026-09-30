@@ -76,6 +76,10 @@ func copyAccount(acc *Account) *Account {
 	}
 	cp := *acc
 	cp.Cookies = cloneCookies(acc.Cookies)
+	if acc.Mailbox != nil {
+		mailbox := *acc.Mailbox
+		cp.Mailbox = &mailbox
+	}
 	return &cp
 }
 
@@ -327,6 +331,7 @@ func (a *Account) validateCookies() {
 	// 显式接收 validate 刷新的 Cookie，不依赖传入 map 的引用关系。
 	a.Cookies = client.Cookies
 	a.Status = "active"
+	a.LastError = ""
 	if info := client.AccountInfo(); info != nil {
 		a.RealEmail = firstNonEmpty(info.AppleID, info.PrimaryEmail)
 		if a.ICloudEmail == "" {
@@ -335,6 +340,7 @@ func (a *Account) validateCookies() {
 	}
 	if aliases, err := client.ListAliases(); err == nil {
 		a.AliasTotal = len(aliases)
+		a.AliasActive = 0
 		for _, al := range aliases {
 			if al.Active {
 				a.AliasActive++

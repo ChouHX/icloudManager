@@ -9,6 +9,8 @@ iCloud HME 的管理界面前端：React 19 + TypeScript + Vite 8 + Ant Design 6
 - **账号设置** `/accounts` — 账号增删改与凭据配置（Cookie / App 专用密码 / 收件邮箱 / 代理）
 - **登录** `/login` — 管理员密码登录
 
+账号列表的「凭据配置 → 账号检测」会重新验证已配置的 Cookie、App 专用密码和收件邮箱，逐项显示结果并刷新账号状态；全部通过时更新最近验证时间。
+
 ## 邮件正文渲染
 
 `GET /api/inbox/:id` 返回 `body`（纯文本）与 `body_html`（清理后的原始 HTML）。`src/components/MailBody.tsx` 把 HTML 放进 `sandbox="allow-same-origin"` 的 iframe：

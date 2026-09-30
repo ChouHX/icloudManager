@@ -37,6 +37,9 @@ type fakeBackend struct {
 	appPwdEmail  string
 	loginID      string
 	loginErr     error
+	checkedID    string
+	checkResult  account.CheckResult
+	checkErr     error
 	removedID    string
 	removedOK    bool
 
@@ -126,6 +129,11 @@ func (f *fakeBackend) LoginAccount(id, password, otp string) (account.Summary, e
 		return account.Summary{}, fmt.Errorf("fake: 登录失败")
 	}
 	return f.accounts[0], nil
+}
+
+func (f *fakeBackend) CheckAccount(id string) (account.CheckResult, error) {
+	f.checkedID = id
+	return f.checkResult, f.checkErr
 }
 
 func (f *fakeBackend) RemoveAccount(id string) bool {

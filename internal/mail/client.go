@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"mime"
+	"net"
 	"sort"
 	"strings"
 	"time"
@@ -84,6 +85,22 @@ func NewClient(appleID, appPassword string) *Client {
 // NewClientWithServer creates an IMAP client for a custom server.
 func NewClientWithServer(username, password, server string, port int) *Client {
 	return &Client{username: username, password: password, server: server, port: port}
+}
+
+// CheckConnection 用新会话验证凭据和收件箱访问权限，不读取或修改邮件。
+func CheckConnection(username, password, server string, port int) error {
+	const timeout = 15 * time.Second
+	cli, err := client.DialWithDialerTLS(&net.Dialer{Timeout: timeout}, net.JoinHostPort(server, fmt.Sprint(port)), nil)
+	if err != nil {
+		return err
+	}
+	defer cli.Terminate()
+	cli.Timeout = timeout
+	if err := cli.Login(username, password); err != nil {
+		return err
+	}
+	_, err = cli.Select("INBOX", true)
+	return err
 }
 
 // Connect 连接并登录 IMAP 服务器。已连接且存活时直接复用。
