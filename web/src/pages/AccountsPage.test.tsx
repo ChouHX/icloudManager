@@ -11,7 +11,13 @@ function renderAccounts() {
   return renderPage(<AccountsPage />, { route: '/accounts', path: '/accounts' })
 }
 
-describe('AccountsPage', () => {
+async function accountRow() {
+  const name = await screen.findByText('主号')
+  return within(name.closest('tr')!)
+}
+
+// CI 上 jsdom 渲染 Ant Design 菜单和弹窗较慢；异步断言仍保留各自的等待上限。
+describe('AccountsPage', { timeout: 15000 }, () => {
   it('渲染账号摘要与凭据标签', async () => {
     renderAccounts()
 
@@ -25,9 +31,9 @@ describe('AccountsPage', () => {
   it('从凭据配置菜单打开更新 Cookie 弹窗', async () => {
     const user = userEvent.setup()
     renderAccounts()
-    await screen.findByText('主号')
+    const row = await accountRow()
 
-    await user.click(screen.getByRole('button', { name: /凭据配置/ }))
+    await user.click(row.getByRole('button', { name: /凭据配置/ }))
     await user.click(await screen.findByText('更新 Cookie'))
 
     const dialog = await screen.findByRole('dialog')
@@ -70,21 +76,25 @@ describe('AccountsPage', () => {
       }),
     )
     renderAccounts()
-    await screen.findByText('主号')
-    await user.click(screen.getByRole('button', { name: /凭据配置/ }))
-    await user.click(await screen.findByRole('menuitem', { name: /账号检测/ }))
-    const trigger = await screen.findByRole('button', { name: /检测中/ })
+    const row = await accountRow()
+    await user.click(row.getByRole('button', { name: /凭据配置/ }))
+    await user.click(await screen.findByText('账号检测'))
+    const trigger = await row.findByRole('button', { name: /检测中/ })
     await user.click(trigger)
-    expect(await screen.findByRole('menuitem', { name: /检测中/ })).toHaveAttribute('aria-disabled', 'true')
-    expect(calls).toBe(1)
-    finishCheck()
+    try {
+      const menu = within(screen.getByRole('menu'))
+      expect(await menu.findByRole('menuitem', { name: /检测中/ })).toHaveAttribute('aria-disabled', 'true')
+      expect(calls).toBe(1)
+    } finally {
+      finishCheck()
+    }
     const dialog = await screen.findByRole('dialog')
     expect(dialog).toHaveAccessibleName('账号检测：主号')
     expect(within(dialog).getByText('Cookie 已失效，请更新')).toBeInTheDocument()
     expect(within(dialog).getByText('iCloud IMAP 连接正常')).toBeInTheDocument()
     expect(await screen.findByText('异常')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /凭据配置/ })).toBeInTheDocument()
-  }, 10000)
+    expect(row.getByRole('button', { name: /凭据配置/ })).toBeInTheDocument()
+  }, 20000)
 
   it.each(['active', 'pending'])('显示检测结果：%s', async (status) => {
     const user = userEvent.setup()
@@ -94,9 +104,9 @@ describe('AccountsPage', () => {
       checks: status === 'active' ? [{ name: 'Cookie', passed: true, message: 'iCloud 会话有效' }] : [],
     } })))
     renderAccounts()
-    await screen.findByText('主号')
-    await user.click(screen.getByRole('button', { name: /凭据配置/ }))
-    await user.click(await screen.findByRole('menuitem', { name: /账号检测/ }))
+    const row = await accountRow()
+    await user.click(row.getByRole('button', { name: /凭据配置/ }))
+    await user.click(await screen.findByText('账号检测'))
     const dialog = await screen.findByRole('dialog')
     expect(within(dialog).getByText(status === 'active' ? 'iCloud 会话有效' : /账号尚未配置凭据/)).toBeInTheDocument()
   })
@@ -107,11 +117,11 @@ describe('AccountsPage', () => {
       { success: false, code: 'ACCOUNT_CHANGED', message: '账号凭据已变更，请重新检测' }, { status: 409 },
     )))
     renderAccounts()
-    await screen.findByText('主号')
-    await user.click(screen.getByRole('button', { name: /凭据配置/ }))
-    await user.click(await screen.findByRole('menuitem', { name: /账号检测/ }))
+    const row = await accountRow()
+    await user.click(row.getByRole('button', { name: /凭据配置/ }))
+    await user.click(await screen.findByText('账号检测'))
     const dialog = await screen.findByRole('dialog')
     expect(within(dialog).getByText('账号凭据已变更，请重新检测')).toBeInTheDocument()
-    await waitFor(() => expect(screen.getByRole('button', { name: /凭据配置/ })).toBeInTheDocument())
+    await waitFor(() => expect(row.getByRole('button', { name: /凭据配置/ })).toBeInTheDocument())
   })
 })

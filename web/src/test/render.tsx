@@ -8,7 +8,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 export function renderPage(element: ReactElement, options: { route?: string; path?: string } = {}) {
   const { route = '/', path = '*' } = options
   return render(
-    <ConfigProvider locale={zhCN}>
+    <ConfigProvider locale={zhCN} theme={{ token: { motion: false } }}>
       <AntdApp>
         <MemoryRouter initialEntries={[route]}>
           <Routes>
