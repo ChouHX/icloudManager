@@ -54,8 +54,15 @@ export default function PublicInboxPage({ token }: { token: string }) {
     {
       title: '主题',
       dataIndex: 'subject',
+      ellipsis: true,
       render: (subject: string, record) => (
-        <Button type="link" size="small" style={{ padding: 0 }} onClick={() => void openMessage(record)}>
+        <Button
+          type="link"
+          size="small"
+          title={subject || '（无主题）'}
+          style={{ padding: 0, maxWidth: '100%', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', textAlign: 'left' }}
+          onClick={() => void openMessage(record)}
+        >
           {subject || '（无主题）'}
         </Button>
       ),
