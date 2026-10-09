@@ -11,6 +11,8 @@ iCloud HME 的管理界面前端：React 19 + TypeScript + Vite 8 + Ant Design 6
 
 账号列表的「凭据配置 → 账号检测」会重新验证已配置的 Cookie、App 专用密码和收件邮箱，逐项显示结果并刷新账号状态；全部通过时更新最近验证时间。
 
+「创建别名」页面选择账号后，点击「一键导出」即可下载该账号的全部别名，不受搜索、状态筛选或分页影响。TXT 文件名包含账号名称、ID 和导出日期，内容每行一个邮箱地址，包含启用和停用的别名。列表加载中、读取失败或没有别名时，导出按钮不可用。
+
 ## 邮件正文渲染
 
 `GET /api/inbox/:id` 返回 `body`（纯文本）与 `body_html`（清理后的原始 HTML）。`src/components/MailBody.tsx` 把 HTML 放进 `sandbox="allow-same-origin"` 的 iframe：

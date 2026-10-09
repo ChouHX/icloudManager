@@ -22,6 +22,7 @@ import {
   CheckCircleOutlined,
   ClockCircleOutlined,
   DeleteOutlined,
+  DownloadOutlined,
   InboxOutlined,
   PlusOutlined,
   ReloadOutlined,
@@ -35,6 +36,7 @@ import AutoCreatePanel from '../components/AutoCreatePanel'
 import ShareLinkModal from '../components/ShareLinkModal'
 import type { Alias, AliasListResult, CreateAliasResult } from '../api/types'
 import { formatDateTime, timestampValue } from '../utils/format'
+import { downloadAliasExport } from '../utils/exportAliases'
 
 type StatusFilter = 'all' | 'active' | 'inactive'
 
@@ -69,6 +71,21 @@ export default function AliasesPage() {
 
   const aliasesUrl = accountId ? `/api/aliases?account_id=${encodeURIComponent(accountId)}` : null
   const { data, loading, error, reload } = useFetch<AliasListResult>(aliasesUrl)
+  const selectedAccount = accounts.find((account) => account.id === accountId)
+  const canExport = Boolean(
+    selectedAccount && !accountsLoading && !accountsError && !loading && !error &&
+    data?.account_id === accountId && data.aliases.length > 0,
+  )
+
+  function handleExport() {
+    if (!canExport || !selectedAccount || !data) return
+    try {
+      downloadAliasExport(selectedAccount, data.aliases)
+      message.success(`已导出「${selectedAccount.name}」的 ${data.aliases.length} 个别名`)
+    } catch {
+      message.error('导出失败，请重试')
+    }
+  }
 
   // 面板回调必须保持稳定引用:它在创建数增加时被调用,
   // 内联箭头函数每次渲染都会产生新引用,会触发无限刷新(React error #185)。
@@ -284,6 +301,14 @@ export default function AliasesPage() {
             options={accounts.map((a) => ({ value: a.id, label: a.name }))}
             aria-label="选择账号"
           />
+          <Button
+            icon={<DownloadOutlined />}
+            onClick={handleExport}
+            disabled={!canExport}
+            title="导出当前账号的全部别名为 TXT，每行一个邮箱地址（不受搜索、状态筛选和分页影响）"
+          >
+            一键导出
+          </Button>
           <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)} disabled={!accountId}>
             创建别名
           </Button>

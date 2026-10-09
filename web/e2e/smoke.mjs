@@ -35,6 +35,9 @@ const ALIASES = [
   { email: 'beta@icloud.com', anonymousId: 'anon_2', label: '订阅', active: false, createdAt: '2026-08-01T10:00:00+08:00' },
 ]
 
+const SECOND_ACCOUNT = { ...ACCOUNT, id: 'acc_2', name: '备用号', icloud_email: 'backup@icloud.com' }
+const BACKUP_ALIASES = [{ ...ALIASES[0], email: 'backup-alias@icloud.com' }]
+
 // 自动建满任务运行中的状态(用于验证面板刷新不会造成渲染循环)
 const AUTO_RUNNING = {
   running: true, phase: 'running', target: 700, total: 12, created: 5, failed: 0,
@@ -97,6 +100,13 @@ function check(name, passed, detail = '') {
 
 const json = (data) => ({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data }) })
 
+async function readDownload(download) {
+  const stream = await download.createReadStream()
+  const chunks = []
+  for await (const chunk of stream) chunks.push(chunk)
+  return Buffer.concat(chunks).toString('utf8')
+}
+
 async function launchBrowser() {
   const attempts = [
     ['playwright 自带 chromium', {}],
@@ -141,10 +151,12 @@ async function main() {
   })
   page.on('pageerror', (err) => consoleErrors.push(`页面异常: ${err.message}`))
 
-  await page.route('**/api/accounts', (route) => route.fulfill(json([ACCOUNT])))
-  await page.route('**/api/aliases**', (route) =>
-    route.fulfill(json({ account_id: ACCOUNT.id, count: ALIASES.length, aliases: ALIASES })),
-  )
+  await page.route('**/api/accounts', (route) => route.fulfill(json([ACCOUNT, SECOND_ACCOUNT])))
+  await page.route('**/api/aliases**', (route) => {
+    const accountId = new URL(route.request().url()).searchParams.get('account_id')
+    const aliases = accountId === SECOND_ACCOUNT.id ? BACKUP_ALIASES : ALIASES
+    return route.fulfill(json({ account_id: accountId, count: aliases.length, aliases }))
+  })
   await page.route('**/api/create', (route) =>
     route.fulfill(json({ email: 'gamma@icloud.com', label: '新用途', created_at: '2026-08-06T10:00:00+08:00', account_id: ACCOUNT.id })),
   )
@@ -226,6 +238,27 @@ async function main() {
     const table = page.locator('tbody tr')
     check('别名列表渲染', (await table.count()) >= 2, `行数 ${await table.count()}`)
     check('停用状态标记', await page.getByText('已停用').first().isVisible())
+
+    // 4.1 实际下载 TXT，验证每行一个地址、筛选不漏数据、账号归属正确。
+    await page.getByPlaceholder('搜索邮箱或标签').fill('alpha')
+    const firstDownload = page.waitForEvent('download')
+    await page.getByRole('button', { name: /一键导出/ }).click()
+    const firstFile = await firstDownload
+    const firstText = await readDownload(firstFile)
+    check('TXT 文件名标明当前账号', /^icloud-hme_主号_acc_1_.*\.txt$/.test(firstFile.suggestedFilename()))
+    check('TXT 每行一个邮箱且包含完整列表', firstText === 'alpha@icloud.com\r\nbeta@icloud.com\r\n')
+    await page.getByPlaceholder('搜索邮箱或标签').fill('')
+    await page.getByRole('combobox', { name: '选择账号' }).click()
+    await page.locator('.ant-select-item-option-content').getByText('备用号', { exact: true }).click()
+    await page.getByText('backup-alias@icloud.com').waitFor()
+    const secondDownload = page.waitForEvent('download')
+    await page.getByRole('button', { name: /一键导出/ }).click()
+    const secondFile = await secondDownload
+    const secondText = await readDownload(secondFile)
+    check('切换账号后导出独立文件和内容', /^icloud-hme_备用号_acc_2_.*\.txt$/.test(secondFile.suggestedFilename()) && secondText === 'backup-alias@icloud.com\r\n')
+    await page.getByRole('combobox', { name: '选择账号' }).click()
+    await page.locator('.ant-select-item-option-content').getByText('主号', { exact: true }).click()
+    await page.getByText('alpha@icloud.com').waitFor()
 
     // 5. 自动建满面板(读取真实后端的任务状态)
     await page.getByRole('button', { name: /自动建满/ }).click()
