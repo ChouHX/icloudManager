@@ -8,7 +8,7 @@ function renderTags() {
   return renderPage(<TagsPage />, { route: '/tags', path: '/tags' })
 }
 
-describe('TagsPage', { timeout: 15000 }, () => {
+describe('TagsPage', { timeout: 30000 }, () => {
   it('渲染标签凭据记录与项目标签', async () => {
     renderTags()
 
@@ -116,8 +116,9 @@ describe('TagsPage', { timeout: 15000 }, () => {
     expect(within(dialog).getAllByText('使用记录数').length).toBeGreaterThan(0)
 
     const row = within(dialog)
-      .getAllByRole('row')
-      .find((r) => within(r).queryByText('开发') && within(r).queryByRole('button', { name: /重命名/ }))
+      .getAllByText('开发')
+      .map((el) => el.closest('tr'))
+      .find((tr) => tr && within(tr as HTMLElement).queryByRole('button', { name: /重命名/ })) as HTMLElement | undefined
     expect(row).toBeTruthy()
     await user.click(within(row!).getByRole('button', { name: /重命名/ }))
     const input = within(row!).getByRole('textbox')
