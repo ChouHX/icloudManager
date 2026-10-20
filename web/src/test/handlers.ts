@@ -109,6 +109,39 @@ export const TAG_ENTRIES = [
   },
 ]
 
+/** 与后端 ListQuery 对应的筛选逻辑,供列表与批量打标签复用 */
+function filterTagEntries(query: {
+  search?: string
+  tags?: string[]
+  site?: string
+  created_from?: string
+  created_to?: string
+}) {
+  const search = (query.search ?? '').trim().toLowerCase()
+  const site = (query.site ?? '').trim().toLowerCase()
+  const filters = (query.tags ?? []).map((tag) => tag.trim().toLowerCase()).filter(Boolean)
+  const from = query.created_from ? new Date(query.created_from).getTime() : null
+  const to = query.created_to ? new Date(query.created_to).getTime() : null
+
+  return TAG_ENTRIES.filter((entry) => {
+    const entryTags = (entry.tags ?? []).map((tag) => tag.toLowerCase())
+    if (site && (entry.site ?? '').toLowerCase() !== site) return false
+    if (filters.length > 0 && !entryTags.some((tag) => filters.includes(tag))) return false
+    if (from !== null || to !== null) {
+      const created = new Date(entry.created_at).getTime()
+      if (from !== null && created < from) return false
+      if (to !== null && created > to) return false
+    }
+    if (!search) return true
+    return (
+      entry.email.toLowerCase().includes(search) ||
+      (entry.site ?? '').toLowerCase().includes(search) ||
+      (entry.note ?? '').toLowerCase().includes(search) ||
+      entryTags.some((tag) => tag.includes(search))
+    )
+  })
+}
+
 export const handlers = [
   http.post('/api/auth/login', () =>
     HttpResponse.json({ success: true, data: { csrf_token: 'csrf-token', expires_at: '2026-08-05T22:00:00+08:00' } }),
@@ -122,22 +155,13 @@ export const handlers = [
     const url = new URL(request.url)
     const page = Math.max(1, Number(url.searchParams.get('page') ?? '1') || 1)
     const pageSize = Math.max(1, Number(url.searchParams.get('page_size') ?? '20') || 20)
-    const search = (url.searchParams.get('search') ?? '').trim().toLowerCase()
-    const tagParam = (url.searchParams.get('tags') ?? '').trim().toLowerCase()
-    const filters = tagParam
-      ? tagParam.split(',').map((tag) => tag.trim()).filter(Boolean)
-      : []
-
-    const filtered = TAG_ENTRIES.filter((entry) => {
-      const entryTags = (entry.tags ?? []).map((tag) => tag.toLowerCase())
-      if (filters.length > 0 && !entryTags.some((tag) => filters.includes(tag))) return false
-      if (!search) return true
-      return (
-        entry.email.toLowerCase().includes(search) ||
-        (entry.site ?? '').toLowerCase().includes(search) ||
-        (entry.note ?? '').toLowerCase().includes(search) ||
-        entryTags.some((tag) => tag.includes(search))
-      )
+    const tagParam = (url.searchParams.get('tags') ?? '').trim()
+    const filtered = filterTagEntries({
+      search: url.searchParams.get('search') ?? '',
+      tags: tagParam ? tagParam.split(',') : [],
+      site: url.searchParams.get('site') ?? '',
+      created_from: url.searchParams.get('created_from') ?? '',
+      created_to: url.searchParams.get('created_to') ?? '',
     })
 
     const start = (page - 1) * pageSize
@@ -156,10 +180,41 @@ export const handlers = [
           { tag: '项目A', count: 1 },
         ],
         stats: { total: TAG_ENTRIES.length, tags: 3, sites: 2, untagged: 0 },
+        sites: ['GitHub', 'Steam'],
         entries,
       },
     })
   }),
+  http.post('/api/tags/batch', async ({ request }) => {
+    const body = (await request.json()) as {
+      ids?: string[]
+      filter?: {
+        search?: string
+        tags?: string[]
+        site?: string
+        created_from?: string
+        created_to?: string
+      }
+      action?: 'add' | 'remove' | 'replace'
+      tags?: string[]
+    }
+    if (!body.tags || body.tags.length === 0) {
+      return HttpResponse.json(
+        { success: false, code: 'VALIDATION_ERROR', message: '请至少填写一个标签' },
+        { status: 400 },
+      )
+    }
+    const ids = body.ids ?? []
+    const affected =
+      ids.length > 0
+        ? TAG_ENTRIES.filter((entry) => ids.includes(entry.id)).length
+        : filterTagEntries(body.filter ?? {}).length
+    return HttpResponse.json({
+      success: true,
+      data: { affected, action: body.action ?? 'add', tags: body.tags },
+    })
+  }),
+
   http.post('/api/tags', () =>
     HttpResponse.json({
       success: true,

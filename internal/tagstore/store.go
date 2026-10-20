@@ -79,13 +79,37 @@ type TagUsage struct {
 	Count int    `json:"count"`
 }
 
-// ListQuery 是分页查询条件。
+// ListQuery 是分页/批量操作共用的筛选条件。
 type ListQuery struct {
 	Page     int
 	PageSize int
 	Search   string
 	// Tags 按「任一命中」筛选(OR),忽略大小写。
 	Tags []string
+	// Site 按网站精确筛选(忽略大小写)。
+	Site string
+	// CreatedFrom / CreatedTo 按创建时间(RFC3339)闭区间筛选。
+	// 批量导入的新记录,其创建时间即导入时间。
+	CreatedFrom string
+	CreatedTo   string
+}
+
+// hasFilter 判断是否包含任何有效筛选条件。
+//
+// 只有空白的标签/关键字不算筛选条件,避免批量操作误命中全部记录。
+func (q ListQuery) hasFilter() bool {
+	if strings.TrimSpace(q.Search) != "" ||
+		strings.TrimSpace(q.Site) != "" ||
+		strings.TrimSpace(q.CreatedFrom) != "" ||
+		strings.TrimSpace(q.CreatedTo) != "" {
+		return true
+	}
+	for _, tag := range q.Tags {
+		if strings.TrimSpace(tag) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // ListResult 是分页查询结果。
@@ -346,7 +370,7 @@ func (s *Store) ListPage(q ListQuery) (ListResult, error) {
 	if size > maxPageSize {
 		size = maxPageSize
 	}
-	where, args := buildWhere(q.Search, q.Tags)
+	where, args := buildWhere(q)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -478,6 +502,31 @@ func (s *Store) Stats() (Stats, error) {
 	return st, nil
 }
 
+// Sites 返回所有记录中出现过的去重网站名,按字母序排列。
+//
+// 同名网站存在不同大小写写法时,取字典序最小的写法,保证结果可复现。
+func (s *Store) Sites() ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	rows, err := s.db.Query(`SELECT MIN(site) FROM entries
+		WHERE site <> '' GROUP BY lower(site) ORDER BY lower(site)`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := make([]string, 0)
+	for rows.Next() {
+		var site string
+		if err := rows.Scan(&site); err != nil {
+			return nil, err
+		}
+		out = append(out, site)
+	}
+	return out, rows.Err()
+}
+
 // Create 新建一条记录。
 func (s *Store) Create(in Input) (Entry, error) {
 	email, password, site, tags, note, err := normalize(in)
@@ -598,12 +647,12 @@ func cloneArgs(args []any) []any {
 	return out
 }
 
-// buildWhere 生成分页/统计共用的 WHERE 子句(表别名 e)。
-func buildWhere(search string, tags []string) (string, []any) {
-	clauses := make([]string, 0, 2)
-	args := make([]any, 0, 4+len(tags))
+// buildWhere 生成分页/批量操作共用的 WHERE 子句(表别名 e)。
+func buildWhere(q ListQuery) (string, []any) {
+	clauses := make([]string, 0, 5)
+	args := make([]any, 0, 6+len(q.Tags))
 
-	search = strings.TrimSpace(search)
+	search := strings.TrimSpace(q.Search)
 	if search != "" {
 		like := "%" + strings.ToLower(search) + "%"
 		clauses = append(clauses, `(lower(e.email) LIKE ? OR lower(e.site) LIKE ? OR lower(e.note) LIKE ?
@@ -611,7 +660,20 @@ func buildWhere(search string, tags []string) (string, []any) {
 		args = append(args, like, like, like, like)
 	}
 
-	if len(tags) > 0 {
+	if site := strings.TrimSpace(q.Site); site != "" {
+		clauses = append(clauses, `lower(e.site) = lower(?)`)
+		args = append(args, site)
+	}
+	if from := strings.TrimSpace(q.CreatedFrom); from != "" {
+		clauses = append(clauses, `datetime(e.created_at) >= datetime(?)`)
+		args = append(args, from)
+	}
+	if to := strings.TrimSpace(q.CreatedTo); to != "" {
+		clauses = append(clauses, `datetime(e.created_at) <= datetime(?)`)
+		args = append(args, to)
+	}
+
+	if tags := q.Tags; len(tags) > 0 {
 		seen := make(map[string]struct{}, len(tags))
 		lowers := make([]string, 0, len(tags))
 		for _, tag := range tags {

@@ -164,12 +164,42 @@ export interface TagListResult {
   total_pages?: number
   /** 所有记录中出现过的去重标签 */
   tags: string[]
+  /** 所有记录中出现过的去重网站名 */
+  sites?: string[]
   /** 每个标签的使用记录数(覆盖全部分页) */
   tag_counts?: TagUsageCount[]
   /** 汇总统计卡片数据 */
   stats?: TagStats
   /** 当前页记录 */
   entries: TagEntry[]
+}
+
+/** 批量修改标签的筛选条件(与列表筛选一致) */
+export interface TagBatchFilter {
+  search?: string
+  tags?: string[]
+  site?: string
+  created_from?: string
+  created_to?: string
+}
+
+/** 批量修改标签的操作:追加 / 移除 / 覆盖 */
+export type TagBatchAction = 'add' | 'remove' | 'replace'
+
+/** 批量修改标签的输入 */
+export interface TagBatchInput {
+  /** 勾选的记录 ID;为空时使用 filter */
+  ids?: string[]
+  filter?: TagBatchFilter
+  action: TagBatchAction
+  tags: string[]
+}
+
+/** 批量修改标签的结果 */
+export interface TagBatchResult {
+  affected: number
+  action: TagBatchAction
+  tags: string[]
 }
 
 /** 创建/更新标签凭据的输入 */

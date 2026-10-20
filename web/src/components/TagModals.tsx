@@ -28,6 +28,10 @@ import {
 import { ApiError, request } from '../api/client'
 import type {
   TagBackup,
+  TagBatchAction,
+  TagBatchFilter,
+  TagBatchInput,
+  TagBatchResult,
   TagEntry,
   TagImportInput,
   TagImportResult,
@@ -579,6 +583,168 @@ export function TagBackupModal({
           </Button>
         </Space>
       )}
+    </Modal>
+  )
+}
+
+const BATCH_ACTION_LABEL: Record<TagBatchAction, string> = {
+  add: '追加标签',
+  remove: '移除标签',
+  replace: '覆盖标签',
+}
+
+const BATCH_ACTION_HELP: Record<TagBatchAction, string> = {
+  add: '保留记录原有的标签，只追加这里填写的标签（已存在则自动跳过）。',
+  remove: '只删除这里填写的标签，记录的其他标签保持不变。',
+  replace: '先清空这些记录的全部标签，再写入这里填写的标签。',
+}
+
+/** 按筛选结果或勾选记录批量追加/移除/覆盖标签 */
+export function TagBatchModal({
+  open,
+  filteredCount,
+  selectedIds,
+  filter,
+  tagOptions,
+  onClose,
+  onDone,
+}: {
+  open: boolean
+  filteredCount: number
+  selectedIds: string[]
+  filter: TagBatchFilter
+  tagOptions: string[]
+  onClose: () => void
+  onDone: () => void
+}) {
+  const { message } = AntdApp.useApp()
+  const [scope, setScope] = useState<'filter' | 'ids'>(selectedIds.length > 0 ? 'ids' : 'filter')
+  const [action, setAction] = useState<TagBatchAction>('add')
+  const [tags, setTags] = useState<string[]>([])
+  const [error, setError] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+
+  const targetCount = scope === 'ids' ? selectedIds.length : filteredCount
+  const hasFilter = Boolean(
+    filter.search ||
+      filter.site ||
+      filter.created_from ||
+      filter.created_to ||
+      (filter.tags && filter.tags.length > 0),
+  )
+  const missingFilter = scope === 'filter' && !hasFilter
+
+  async function handleOk() {
+    if (missingFilter) {
+      setError('请先在列表上方设置筛选条件，或改为勾选具体记录')
+      return
+    }
+    if (tags.length === 0) {
+      setError('请至少填写一个标签')
+      return
+    }
+    if (targetCount === 0) {
+      setError('当前范围没有可修改的记录，请先调整筛选条件')
+      return
+    }
+    const body: TagBatchInput = {
+      action,
+      tags,
+      ...(scope === 'ids' ? { ids: selectedIds } : { filter }),
+    }
+    setSubmitting(true)
+    setError('')
+    try {
+      const result = await request<TagBatchResult>('/api/tags/batch', { method: 'POST', body })
+      message.success(`已为 ${result.affected} 条记录更新标签`)
+      onDone()
+      onClose()
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : '网络连接失败，请检查服务状态')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <Modal
+      open={open}
+      title="批量打标签"
+      width={560}
+      onCancel={onClose}
+      onOk={() => void handleOk()}
+      okText="执行"
+      confirmLoading={submitting}
+      okButtonProps={{ disabled: missingFilter }}
+      destroyOnHidden
+      mask={{ closable: false }}
+    >
+      {error && <Alert type="error" showIcon title={error} style={{ marginBottom: 16 }} />}
+      <Space orientation="vertical" size={18} style={{ width: '100%' }}>
+        <div>
+          <Typography.Text strong>作用范围</Typography.Text>
+          <Radio.Group
+            value={scope}
+            onChange={(e) => setScope(e.target.value as 'filter' | 'ids')}
+            style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}
+          >
+            <Radio value="filter">当前筛选结果（{filteredCount} 条）</Radio>
+            <Radio value="ids" disabled={selectedIds.length === 0}>
+              已勾选的记录（{selectedIds.length} 条）
+            </Radio>
+          </Radio.Group>
+          {scope === 'filter' && filteredCount === 0 && (
+            <Typography.Text type="secondary">
+              当前筛选没有记录，请先调整上方的搜索、标签、网站或时间条件。
+            </Typography.Text>
+          )}
+          {missingFilter && filteredCount > 0 && (
+            <Alert
+              type="warning"
+              showIcon
+              title="当前没有筛选条件"
+              description="为避免误改全部记录，请先关闭弹窗并设置网站、时间、标签或搜索条件；也可以直接勾选具体记录。"
+              style={{ marginTop: 8 }}
+            />
+          )}
+        </div>
+
+        <div>
+          <Typography.Text strong>操作</Typography.Text>
+          <Radio.Group
+            value={action}
+            onChange={(e) => setAction(e.target.value as TagBatchAction)}
+            style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}
+          >
+            <Radio value="add">{BATCH_ACTION_LABEL.add}</Radio>
+            <Radio value="remove">{BATCH_ACTION_LABEL.remove}</Radio>
+            <Radio value="replace">{BATCH_ACTION_LABEL.replace}</Radio>
+          </Radio.Group>
+        </div>
+
+        <div>
+          <Typography.Text strong>标签</Typography.Text>
+          <Select
+            mode="tags"
+            style={{ width: '100%', marginTop: 8 }}
+            value={tags}
+            onChange={setTags}
+            placeholder="输入标签后回车，可填写多个"
+            options={tagOptions.map((tag) => ({ value: tag, label: tag }))}
+            tokenSeparators={[',', '，', ' ']}
+            maxTagCount="responsive"
+          />
+          <Typography.Text type="secondary" style={{ display: 'block', marginTop: 6 }}>
+            {BATCH_ACTION_HELP[action]}
+          </Typography.Text>
+        </div>
+
+        <Alert
+          type={action === 'replace' ? 'warning' : 'info'}
+          showIcon
+          title={`将对 ${targetCount} 条记录执行「${BATCH_ACTION_LABEL[action]}」`}
+        />
+      </Space>
     </Modal>
   )
 }

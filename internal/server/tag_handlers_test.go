@@ -413,3 +413,103 @@ func TestTagsPaginationAndStats(t *testing.T) {
 		t.Fatalf("越界页码应回退: %d %s", status, body)
 	}
 }
+
+// TestTagsBatchByFilterAndIDs 验证按筛选条件/ID 批量修改标签。
+func TestTagsBatchByFilterAndIDs(t *testing.T) {
+	dir := t.TempDir()
+	s := mustServer(t, &fakeBackend{}, Config{
+		AdminPassword: "admin-pass-2026-strong",
+		DataDir:       dir,
+	})
+	ts := httptest.NewServer(s.Handler())
+	defer ts.Close()
+	sess, csrf := login(t, ts, "admin-pass-2026-strong")
+
+	authed := func(method, path, body string) *http.Request {
+		req := authedReq(t, ts, method, path, body)
+		req.AddCookie(&http.Cookie{Name: "hme_session", Value: sess})
+		if method != "GET" {
+			req.Header.Set("X-CSRF-Token", csrf)
+		}
+		return req
+	}
+
+	ids := make([]string, 0, 3)
+	for _, body := range []string{
+		`{"email":"a@example.com","site":"GitHub"}`,
+		`{"email":"b@example.com","site":"GitHub"}`,
+		`{"email":"c@example.com","site":"Steam"}`,
+	} {
+		status, resp, _ := do(t, authed("POST", "/api/tags", body))
+		if status != http.StatusOK {
+			t.Fatalf("创建失败: %d %s", status, resp)
+		}
+		var created struct {
+			Data struct {
+				ID string `json:"id"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal([]byte(resp), &created); err != nil {
+			t.Fatalf("解析创建响应: %v", err)
+		}
+		ids = append(ids, created.Data.ID)
+	}
+
+	// 没有 ID 也没有筛选条件时应拒绝,避免误改全部记录
+	status, resp, _ := do(t, authed("POST", "/api/tags/batch", `{"action":"add","tags":["x"]}`))
+	if status != http.StatusBadRequest || !strings.Contains(resp, "请先筛选或勾选") {
+		t.Fatalf("空条件应 400: %d %s", status, resp)
+	}
+
+	// 按网站批量追加
+	status, resp, _ = do(t, authed("POST", "/api/tags/batch",
+		`{"filter":{"site":"github"},"action":"add","tags":["批量"]}`))
+	if status != http.StatusOK || !strings.Contains(resp, `"affected":2`) {
+		t.Fatalf("按网站批量追加失败: %d %s", status, resp)
+	}
+
+	// 按 ID 覆盖
+	status, resp, _ = do(t, authed("POST", "/api/tags/batch",
+		`{"ids":["`+ids[2]+`"],"action":"replace","tags":["覆盖"]}`))
+	if status != http.StatusOK || !strings.Contains(resp, `"affected":1`) {
+		t.Fatalf("按 ID 覆盖失败: %d %s", status, resp)
+	}
+
+	// 列表校验结果与 sites 字段
+	status, resp, _ = do(t, authed("GET", "/api/tags?page_size=10", ""))
+	if status != http.StatusOK {
+		t.Fatalf("列表失败: %d %s", status, resp)
+	}
+	var list struct {
+		Data struct {
+			Entries []struct {
+				ID   string   `json:"id"`
+				Tags []string `json:"tags"`
+			} `json:"entries"`
+			Sites []string `json:"sites"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(resp), &list); err != nil {
+		t.Fatalf("解析列表: %v", err)
+	}
+	if len(list.Data.Sites) != 2 || list.Data.Sites[0] != "GitHub" || list.Data.Sites[1] != "Steam" {
+		t.Fatalf("sites 字段不符: %v", list.Data.Sites)
+	}
+	byID := make(map[string][]string, len(list.Data.Entries))
+	for _, entry := range list.Data.Entries {
+		byID[entry.ID] = entry.Tags
+	}
+	for _, id := range ids[:2] {
+		if len(byID[id]) != 1 || byID[id][0] != "批量" {
+			t.Fatalf("GitHub 记录应带「批量」: id=%s tags=%v", id, byID[id])
+		}
+	}
+	if got := byID[ids[2]]; len(got) != 1 || got[0] != "覆盖" {
+		t.Fatalf("Steam 记录应被覆盖: %v", got)
+	}
+
+	// 非法时间参数返回 400
+	if status, _, _ := do(t, authed("GET", "/api/tags?created_from=not-a-time", "")); status != http.StatusBadRequest {
+		t.Fatalf("非法时间参数应 400,得到 %d", status)
+	}
+}

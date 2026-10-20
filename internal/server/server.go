@@ -180,6 +180,7 @@ func (s *Server) register() {
 			authed.GET("/tags/export", s.exportTagsHandler)
 			authed.POST("/tags", csrfCheck(s.auth), s.createTagHandler)
 			authed.POST("/tags/import", csrfCheck(s.auth), s.importTagsHandler)
+			authed.POST("/tags/batch", csrfCheck(s.auth), s.batchTagsHandler)
 			authed.POST("/tags/restore", csrfCheck(s.auth), s.restoreTagsHandler)
 			authed.PUT("/tags/:id", csrfCheck(s.auth), s.updateTagHandler)
 			authed.DELETE("/tags/:id", csrfCheck(s.auth), s.deleteTagHandler)

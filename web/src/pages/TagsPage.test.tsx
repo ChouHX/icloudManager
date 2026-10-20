@@ -81,11 +81,74 @@ describe('TagsPage', { timeout: 30000 }, () => {
     renderTags()
     await screen.findByText('user@example.com')
 
-    await user.click(screen.getByRole('combobox', { name: '' }))
+    const tagSelect = screen.getByText('按项目标签筛选').closest('.ant-select') as HTMLElement
+    await user.click(within(tagSelect).getByRole('combobox'))
     await user.click(await screen.findByTitle('游戏'))
 
     expect(await screen.findByText('gamer@example.com')).toBeInTheDocument()
     expect(screen.queryByText('user@example.com')).not.toBeInTheDocument()
+  })
+
+  it('没有筛选条件时不允许批量修改全部记录', async () => {
+    const user = userEvent.setup()
+    renderTags()
+    await screen.findByText('user@example.com')
+
+    await user.click(screen.getByRole('button', { name: /批量打标签/ }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText('当前没有筛选条件')).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: /执\s*行/ })).toBeDisabled()
+  })
+
+  it('按网站筛选记录', async () => {
+    const user = userEvent.setup()
+    renderTags()
+    await screen.findByText('user@example.com')
+
+    const select = screen.getByText('按网站筛选').closest('.ant-select') as HTMLElement
+    await user.click(within(select).getByRole('combobox'))
+    await user.click(await screen.findByTitle('GitHub'))
+
+    expect(await screen.findByText('user@example.com')).toBeInTheDocument()
+    expect(screen.queryByText('gamer@example.com')).not.toBeInTheDocument()
+  })
+
+  it('按当前筛选结果批量打标签', async () => {
+    const user = userEvent.setup()
+    renderTags()
+    await screen.findByText('user@example.com')
+
+    const select = screen.getByText('按网站筛选').closest('.ant-select') as HTMLElement
+    await user.click(within(select).getByRole('combobox'))
+    await user.click(await screen.findByTitle('GitHub'))
+    await waitFor(() => expect(screen.queryByText('gamer@example.com')).not.toBeInTheDocument())
+
+    await user.click(screen.getByRole('button', { name: /批量打标签/ }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText('当前筛选结果（1 条）')).toBeInTheDocument()
+
+    await user.type(within(dialog).getByRole('combobox'), '新标签')
+    await user.keyboard('{Enter}')
+    await user.click(within(dialog).getByRole('button', { name: /执\s*行/ }))
+
+    expect(await screen.findByText('已为 1 条记录更新标签')).toBeInTheDocument()
+  })
+
+  it('按勾选记录批量打标签', async () => {
+    const user = userEvent.setup()
+    renderTags()
+    const email = await screen.findByText('user@example.com')
+    await user.click(within(email.closest('tr')!).getByRole('checkbox'))
+
+    await user.click(screen.getByRole('button', { name: /批量打标签/ }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText('已勾选的记录（1 条）')).toBeInTheDocument()
+
+    await user.type(within(dialog).getByRole('combobox'), '勾选标签')
+    await user.keyboard('{Enter}')
+    await user.click(within(dialog).getByRole('button', { name: /执\s*行/ }))
+
+    expect(await screen.findByText('已为 1 条记录更新标签')).toBeInTheDocument()
   })
 
   it('搜索可过滤记录', async () => {

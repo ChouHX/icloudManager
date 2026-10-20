@@ -694,7 +694,7 @@ X-CSRF-Token: <token>
 **列出记录（分页）**
 
 ```http
-GET /api/tags?page=1&page_size=20&search=github&tags=项目A,游戏
+GET /api/tags?page=1&page_size=20&search=github&tags=项目A,游戏&site=GitHub&created_from=2026-08-01T00:00:00%2B08:00&created_to=2026-08-31T23:59:59%2B08:00
 ```
 
 | 查询参数 | 说明 |
@@ -703,6 +703,9 @@ GET /api/tags?page=1&page_size=20&search=github&tags=项目A,游戏
 | `page_size` | 每页条数，默认 20，最大 200 |
 | `search` | 关键字，匹配邮箱、网站、备注或标签（忽略大小写） |
 | `tags` | 标签筛选，逗号分隔，命中任一即可（OR） |
+| `site` | 网站精确筛选（忽略大小写） |
+| `created_from` | 创建时间下限（RFC3339，闭区间）；批量导入的新记录即导入时间 |
+| `created_to` | 创建时间上限（RFC3339，闭区间） |
 
 ```json
 {
@@ -713,6 +716,7 @@ GET /api/tags?page=1&page_size=20&search=github&tags=项目A,游戏
     "page_size": 20,
     "total_pages": 1,
     "tags": ["项目A", "开发", "游戏"],
+    "sites": ["GitHub", "Steam"],
     "tag_counts": [
       { "tag": "项目A", "count": 1 },
       { "tag": "开发", "count": 1 },
@@ -737,6 +741,7 @@ GET /api/tags?page=1&page_size=20&search=github&tags=项目A,游戏
 
 - `count` 是符合筛选条件的记录总数；`entries` 仅为当前页。
 - `tags` 是全部记录中出现过的去重标签，可直接用于筛选下拉框。
+- `sites` 是全部记录中出现过的去重网站名，可直接用于网站筛选下拉框。
 - `tag_counts` 是每个标签的使用记录数（覆盖全部分页），供标签管理弹窗使用。
 - `stats` 是页面顶部统计卡片数据：记录总数、标签数、网站数、未打标签的记录数。
 
@@ -774,6 +779,45 @@ X-CSRF-Token: <token>
 ```
 
 记录不存在返回 `404 TAG_NOT_FOUND`。删除仅影响本地记录，不影响任何网站账号。
+
+**批量修改标签**
+
+```http
+POST /api/tags/batch
+X-CSRF-Token: <token>
+
+{
+  "filter": { "site": "GitHub", "created_from": "2026-08-01T00:00:00+08:00", "created_to": "2026-08-31T23:59:59+08:00" },
+  "action": "add",
+  "tags": ["项目A", "待整理"]
+}
+```
+
+按 ID 精确操作时改用 `ids`；`ids` 非空时忽略 `filter`：
+
+```json
+{ "ids": ["tag_1a2b3c4d", "tag_2b3c4d5e"], "action": "replace", "tags": ["仅此标签"] }
+```
+
+| 字段 | 说明 |
+| --- | --- |
+| `ids` | 要修改的记录 ID 列表；与 `filter` 二选一 |
+| `filter` | 与列表接口相同的筛选条件：`search`、`tags`、`site`、`created_from`、`created_to` |
+| `action` | `add` 追加、`remove` 移除指定标签、`replace` 清空后覆盖 |
+| `tags` | 要操作的标签，至少一个，规则与新增记录一致 |
+
+```json
+{
+  "success": true,
+  "data": { "affected": 2, "action": "add", "tags": ["项目A", "待整理"] }
+}
+```
+
+- `affected` 是命中的记录数；追加时已存在的标签自动跳过，不会重复。
+- `ids` 和 `filter` 都为空时返回 `400 VALIDATION_ERROR`，避免误改全部记录。
+- 时间参数必须是 RFC3339 格式，且 `created_from` 不能晚于 `created_to`。
+- 所有写入在同一个 SQLite 事务内完成，任一步失败都会整体回滚。
+- 时间筛选基于 `created_at`；通过批量导入新增的记录，其 `created_at` 即导入时间。
 
 **批量导入**
 

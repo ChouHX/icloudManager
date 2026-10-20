@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestListPagePagination(t *testing.T) {
@@ -230,5 +231,72 @@ func TestNewStoreRelativeDataDir(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "data", "tags.db")); err != nil {
 		t.Fatalf("tags.db 未创建: %v", err)
+	}
+}
+
+func TestListPageSiteAndTimeFilter(t *testing.T) {
+	s := newTestStore(t)
+	if _, err := s.Create(Input{Email: "a@example.com", Site: "GitHub", Tags: []string{"开发"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Create(Input{Email: "b@example.com", Site: "Steam", Tags: []string{"游戏"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Create(Input{Email: "c@example.com"}); err != nil {
+		t.Fatal(err)
+	}
+
+	bySite, err := s.ListPage(ListQuery{Site: "github"})
+	if err != nil || bySite.Total != 1 || bySite.Entries[0].Email != "a@example.com" {
+		t.Fatalf("网站筛选失败: %+v %v", bySite, err)
+	}
+
+	now := time.Now()
+	byTime, err := s.ListPage(ListQuery{
+		CreatedFrom: now.Add(-time.Hour).Format(time.RFC3339),
+		CreatedTo:   now.Add(time.Hour).Format(time.RFC3339),
+	})
+	if err != nil || byTime.Total != 3 {
+		t.Fatalf("时间筛选失败: %+v %v", byTime, err)
+	}
+	future, err := s.ListPage(ListQuery{CreatedFrom: now.Add(24 * time.Hour).Format(time.RFC3339)})
+	if err != nil || future.Total != 0 {
+		t.Fatalf("未来时间段应无记录: %+v %v", future, err)
+	}
+
+	sites, err := s.Sites()
+	if err != nil {
+		t.Fatalf("Sites: %v", err)
+	}
+	if len(sites) != 2 || sites[0] != "GitHub" || sites[1] != "Steam" {
+		t.Fatalf("网站列表不符: %v", sites)
+	}
+}
+
+func TestListPageTimeFilterTimezone(t *testing.T) {
+	s := newTestStore(t)
+	_, err := s.Restore(RestoreInput{Entries: []Entry{
+		{Email: "a@example.com", CreatedAt: "2026-08-01T00:30:00+08:00"},
+		{Email: "b@example.com", CreatedAt: "2026-08-31T23:30:00+08:00"},
+	}})
+	if err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+
+	// 东八区 8 月 1 日 00:00 ~ 23:59:59 对应 UTC 7 月 31 日 16:00 ~ 8 月 1 日 15:59:59
+	aug1, err := s.ListPage(ListQuery{
+		CreatedFrom: "2026-07-31T16:00:00Z",
+		CreatedTo:   "2026-08-01T15:59:59Z",
+	})
+	if err != nil || aug1.Total != 1 || aug1.Entries[0].Email != "a@example.com" {
+		t.Fatalf("东八区 8 月 1 日筛选失败: %+v %v", aug1, err)
+	}
+
+	aug31, err := s.ListPage(ListQuery{
+		CreatedFrom: "2026-08-30T16:00:00Z",
+		CreatedTo:   "2026-08-31T15:59:59Z",
+	})
+	if err != nil || aug31.Total != 1 || aug31.Entries[0].Email != "b@example.com" {
+		t.Fatalf("东八区 8 月 31 日筛选失败: %+v %v", aug31, err)
 	}
 }

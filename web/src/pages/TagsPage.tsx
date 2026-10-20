@@ -4,6 +4,7 @@ import {
   App as AntdApp,
   Button,
   Card,
+  DatePicker,
   Form,
   Input,
   Modal,
@@ -17,6 +18,7 @@ import {
   Typography,
 } from 'antd'
 import type { TableProps } from 'antd'
+import type { Dayjs } from 'dayjs'
 import {
   DeleteOutlined,
   DownloadOutlined,
@@ -24,14 +26,15 @@ import {
   InfoCircleOutlined,
   PlusOutlined,
   ReloadOutlined,
+  TagOutlined,
   TagsOutlined,
   UploadOutlined,
 } from '@ant-design/icons'
 import { ApiError, request } from '../api/client'
 import { useTags } from '../api/hooks'
-import type { TagEntry, TagEntryInput } from '../api/types'
+import type { TagBatchFilter, TagEntry, TagEntryInput } from '../api/types'
 import { formatDateTime } from '../utils/format'
-import { TagBackupModal, TagImportModal, TagManageModal } from '../components/TagModals'
+import { TagBackupModal, TagBatchModal, TagImportModal, TagManageModal } from '../components/TagModals'
 
 /** 密码单元格:默认打码,可切换显示,支持一键复制 */
 function PasswordCell({ password }: { password?: string }) {
@@ -198,15 +201,21 @@ export default function TagsPage() {
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
   const [selectedTags, setSelectedTags] = useState<string[]>([])
+  const [site, setSite] = useState('')
+  const [dateRange, setDateRange] = useState<[Dayjs | null, Dayjs | null] | null>(null)
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
 
   // 输入防抖,避免每敲一个字符都请求服务端
   useEffect(() => {
+    const trimmed = searchInput.trim()
+    if (trimmed === search) return
     const timer = setTimeout(() => {
-      setSearch(searchInput.trim())
+      setSearch(trimmed)
       setPage(1)
+      setSelectedIds([])
     }, 300)
     return () => clearTimeout(timer)
-  }, [searchInput])
+  }, [searchInput, search])
 
   const query = useMemo(() => {
     const params = new URLSearchParams()
@@ -214,8 +223,11 @@ export default function TagsPage() {
     params.set('page_size', String(pageSize))
     if (search) params.set('search', search)
     if (selectedTags.length > 0) params.set('tags', selectedTags.join(','))
+    if (site) params.set('site', site)
+    if (dateRange?.[0]) params.set('created_from', dateRange[0].startOf('day').toISOString())
+    if (dateRange?.[1]) params.set('created_to', dateRange[1].endOf('day').toISOString())
     return `?${params.toString()}`
-  }, [page, pageSize, search, selectedTags])
+  }, [page, pageSize, search, selectedTags, site, dateRange])
 
   const { data, loading, error, reload } = useTags(query)
   const { message } = AntdApp.useApp()
@@ -224,12 +236,24 @@ export default function TagsPage() {
   const [importOpen, setImportOpen] = useState(false)
   const [manageOpen, setManageOpen] = useState(false)
   const [backupOpen, setBackupOpen] = useState(false)
+  const [batchOpen, setBatchOpen] = useState(false)
   const [editing, setEditing] = useState<TagEntry | null>(null)
 
   const entries = useMemo(() => data?.entries ?? [], [data])
   const tagOptions = useMemo(() => data?.tags ?? [], [data])
+  const siteOptions = useMemo(() => data?.sites ?? [], [data])
   const stats = data?.stats ?? { total: 0, tags: 0, sites: 0, untagged: 0 }
-  const hasFilters = search !== '' || selectedTags.length > 0
+  const hasFilters = search !== '' || selectedTags.length > 0 || site !== '' || dateRange !== null
+  const batchFilter = useMemo<TagBatchFilter>(
+    () => ({
+      search: search || undefined,
+      tags: selectedTags.length > 0 ? selectedTags : undefined,
+      site: site || undefined,
+      created_from: dateRange?.[0] ? dateRange[0].startOf('day').toISOString() : undefined,
+      created_to: dateRange?.[1] ? dateRange[1].endOf('day').toISOString() : undefined,
+    }),
+    [search, selectedTags, site, dateRange],
+  )
   // 服务端可能因删除/筛选回退页码,展示时以服务端返回的页码为准
   const currentPage = data?.page ?? page
 
@@ -379,6 +403,13 @@ export default function TagsPage() {
           <Button icon={<UploadOutlined />} onClick={() => setImportOpen(true)}>
             批量导入
           </Button>
+          <Button
+            icon={<TagOutlined />}
+            onClick={() => setBatchOpen(true)}
+            disabled={(data?.count ?? 0) === 0 && selectedIds.length === 0}
+          >
+            批量打标签
+          </Button>
           <Button icon={<TagsOutlined />} onClick={() => setManageOpen(true)}>
             标签管理
           </Button>
@@ -416,9 +447,34 @@ export default function TagsPage() {
             onChange={(values) => {
               setSelectedTags(values)
               setPage(1)
+              setSelectedIds([])
             }}
             options={tagOptions.map((tag) => ({ value: tag, label: tag }))}
             maxTagCount="responsive"
+          />
+          <Select
+            allowClear
+            showSearch
+            optionFilterProp="label"
+            placeholder="按网站筛选"
+            style={{ minWidth: 150 }}
+            value={site || undefined}
+            onChange={(value) => {
+              setSite(value ?? '')
+              setPage(1)
+              setSelectedIds([])
+            }}
+            options={siteOptions.map((item) => ({ value: item, label: item }))}
+          />
+          <DatePicker.RangePicker
+            value={dateRange}
+            onChange={(dates) => {
+              setDateRange(dates)
+              setPage(1)
+              setSelectedIds([])
+            }}
+            placeholder={['创建起始', '创建结束']}
+            title="按创建时间筛选（批量导入的记录即导入时间）"
           />
           <Button icon={<ReloadOutlined />} onClick={reload} aria-label="刷新列表" />
         </div>
@@ -460,6 +516,11 @@ export default function TagsPage() {
             columns={columns}
             dataSource={entries}
             loading={loading}
+            rowSelection={{
+              selectedRowKeys: selectedIds,
+              onChange: (keys) => setSelectedIds(keys.map(String)),
+              preserveSelectedRowKeys: true,
+            }}
             pagination={{
               current: currentPage,
               pageSize,
@@ -484,6 +545,21 @@ export default function TagsPage() {
           reload()
         }}
       />
+
+      {batchOpen && (
+        <TagBatchModal
+          open
+          filteredCount={data?.count ?? 0}
+          selectedIds={selectedIds}
+          filter={batchFilter}
+          tagOptions={tagOptions}
+          onClose={() => setBatchOpen(false)}
+          onDone={() => {
+            reload()
+            setSelectedIds([])
+          }}
+        />
+      )}
 
       {importOpen && (
         <TagImportModal
