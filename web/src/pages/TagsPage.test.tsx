@@ -1,8 +1,10 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { http, HttpResponse } from 'msw'
 import { describe, expect, it } from 'vitest'
 import TagsPage from './TagsPage'
 import { renderPage } from '../test/render'
+import { server } from '../test/server'
 
 function renderTags() {
   return renderPage(<TagsPage />, { route: '/tags', path: '/tags' })
@@ -19,6 +21,33 @@ describe('TagsPage', { timeout: 30000 }, () => {
     expect(screen.getByText('游戏')).toBeInTheDocument()
     // 密码默认打码
     expect(screen.queryByText('s3cret-pass')).not.toBeInTheDocument()
+  })
+
+  it('tags 为 null 时不应崩溃', async () => {
+    server.use(
+      http.get('/api/tags', () =>
+        HttpResponse.json({
+          success: true,
+          data: {
+            count: 1,
+            tags: [],
+            entries: [
+              {
+                id: 'tag_null',
+                email: 'nulltags@example.com',
+                tags: null,
+                created_at: '2026-08-06T10:00:00+08:00',
+                updated_at: '2026-08-06T10:00:00+08:00',
+              },
+            ],
+          },
+        }),
+      ),
+    )
+    renderTags()
+
+    expect(await screen.findByText('nulltags@example.com')).toBeInTheDocument()
+    expect(screen.getAllByText('项目标签').length).toBeGreaterThan(0)
   })
 
   it('可切换显示密码', async () => {

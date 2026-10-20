@@ -259,10 +259,16 @@ func (s *Store) Delete(id string) (bool, error) {
 
 func cloneEntry(entry *Entry) Entry {
 	cp := *entry
-	if entry.Tags != nil {
-		cp.Tags = append([]string(nil), entry.Tags...)
-	}
+	cp.Tags = cloneTags(entry.Tags)
 	return cp
+}
+
+// cloneTags 返回非 nil 的标签副本,保证序列化为 [] 而不是 null。
+func cloneTags(tags []string) []string {
+	if len(tags) == 0 {
+		return []string{}
+	}
+	return append([]string(nil), tags...)
 }
 
 // normalize 校验并规整输入字段。

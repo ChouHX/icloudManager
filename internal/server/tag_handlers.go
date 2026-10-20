@@ -90,6 +90,8 @@ func (s *Server) importTagsHandler(c *gin.Context) {
 		failCode(c, http.StatusBadRequest, "VALIDATION_ERROR", err.Error())
 		return
 	}
+	// 万级导入时逐条回传会显著撑大响应,前端也只用统计信息。
+	result.Entries = nil
 	ok(c, result)
 }
 

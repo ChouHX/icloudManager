@@ -22,12 +22,14 @@ type ImportInput struct {
 }
 
 // ImportResult 是批量导入的结果。
+//
+// Entries 仅供内部/测试使用,HTTP 响应会置空以避免万级导入时响应过大。
 type ImportResult struct {
 	Imported int      `json:"imported"`
 	Updated  int      `json:"updated"`
 	Skipped  int      `json:"skipped"`
 	Invalid  int      `json:"invalid"`
-	Entries  []Entry  `json:"entries"`
+	Entries  []Entry  `json:"entries,omitempty"`
 	Errors   []string `json:"errors"`
 }
 
@@ -114,7 +116,7 @@ func (s *Store) Import(in ImportInput) (ImportResult, error) {
 			Email:     email,
 			Password:  password,
 			Site:      site,
-			Tags:      append([]string(nil), tags...),
+			Tags:      cloneTags(tags),
 			CreatedAt: now,
 			UpdatedAt: now,
 		}
@@ -185,7 +187,7 @@ func cleanField(s string) string {
 
 // mergeTags 把 add 合并进 existing,忽略大小写重复并限制总量。
 func mergeTags(existing, add []string) []string {
-	out := append([]string(nil), existing...)
+	out := cloneTags(existing)
 	seen := make(map[string]struct{}, len(out))
 	for _, tag := range out {
 		seen[strings.ToLower(tag)] = struct{}{}

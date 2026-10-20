@@ -2,6 +2,7 @@ package tagstore
 
 import (
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -200,5 +201,36 @@ func TestImportRollbackOnSaveFailure(t *testing.T) {
 	}
 	if after := len(s.List()); after != before {
 		t.Fatalf("保存失败后应回滚,记录数 %d → %d", before, after)
+	}
+}
+
+// TestImportWithoutTagsKeepsTagsNonNull 回归:未选标签导入时,tags 必须是
+// 空数组而非 null,否则前端 `for...of entry.tags` 会抛 "not iterable"。
+func TestImportWithoutTagsKeepsTagsNonNull(t *testing.T) {
+	s := newTestStore(t)
+	res, err := s.Import(ImportInput{Text: "a@example.com----pass-a\nb@example.com"})
+	if err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+	if res.Imported != 2 {
+		t.Fatalf("应导入 2 条,实际 %+v", res)
+	}
+	for _, entry := range res.Entries {
+		if entry.Tags == nil {
+			t.Fatalf("导入结果的 tags 不应为 nil: %+v", entry)
+		}
+	}
+	for _, entry := range s.List() {
+		if entry.Tags == nil {
+			t.Fatalf("List 的 tags 不应为 nil: %+v", entry)
+		}
+	}
+
+	raw, err := os.ReadFile(s.path)
+	if err != nil {
+		t.Fatalf("读取存储文件: %v", err)
+	}
+	if strings.Contains(string(raw), `"tags": null`) {
+		t.Fatalf("持久化文件不应出现 tags:null:\n%s", raw)
 	}
 }

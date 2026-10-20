@@ -198,7 +198,7 @@ export default function TagsPage() {
   const tagCounts = useMemo(() => {
     const map: Record<string, number> = {}
     for (const entry of entries) {
-      for (const tag of entry.tags) {
+      for (const tag of entry.tags ?? []) {
         const key = tag.toLowerCase()
         map[key] = (map[key] ?? 0) + 1
       }
@@ -210,7 +210,7 @@ export default function TagsPage() {
     const keyword = search.trim().toLowerCase()
     return entries.filter((entry) => {
       if (selectedTags.length > 0) {
-        const own = new Set(entry.tags.map((tag) => tag.toLowerCase()))
+        const own = new Set((entry.tags ?? []).map((tag) => tag.toLowerCase()))
         if (!selectedTags.some((tag) => own.has(tag.toLowerCase()))) return false
       }
       if (!keyword) return true
@@ -218,7 +218,7 @@ export default function TagsPage() {
         entry.email.toLowerCase().includes(keyword) ||
         (entry.site ?? '').toLowerCase().includes(keyword) ||
         (entry.note ?? '').toLowerCase().includes(keyword) ||
-        entry.tags.some((tag) => tag.toLowerCase().includes(keyword))
+        (entry.tags ?? []).some((tag) => tag.toLowerCase().includes(keyword))
       )
     })
   }, [entries, search, selectedTags])
@@ -258,10 +258,11 @@ export default function TagsPage() {
     {
       title: '项目标签',
       dataIndex: 'tags',
-      render: (tags: string[]) =>
-        tags.length > 0 ? (
+      render: (tags?: string[]) => {
+        const list = tags ?? []
+        return list.length > 0 ? (
           <Space size={4} wrap>
-            {tags.map((tag) => (
+            {list.map((tag) => (
               <Tag key={tag} color="blue">
                 {tag}
               </Tag>
@@ -269,7 +270,8 @@ export default function TagsPage() {
           </Space>
         ) : (
           <Typography.Text type="secondary">—</Typography.Text>
-        ),
+        )
+      },
     },
     {
       title: '备注',

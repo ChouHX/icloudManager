@@ -201,9 +201,24 @@ func TestTagsImport(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("导入失败: %d %s", status, body)
 	}
-	for _, want := range []string{`"imported":2`, `"invalid":1`, `"项目A"`} {
+	for _, want := range []string{`"imported":2`, `"invalid":1`} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("导入结果缺少 %s: %s", want, body)
+		}
+	}
+	// 逐条记录不再随响应回传,避免万级导入响应过大
+	if strings.Contains(body, `"entries"`) {
+		t.Fatalf("导入响应不应包含 entries: %s", body)
+	}
+
+	// 通过列表确认标签与默认网站已落地
+	status, body, _ = do(t, tagAuthed(t, ts, sess, csrf, "GET", "/api/tags", ""))
+	if status != http.StatusOK {
+		t.Fatalf("列表失败: %d %s", status, body)
+	}
+	for _, want := range []string{`"项目A"`, `"Steam"`, `a@example.com`, `b@example.com`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("导入后列表缺少 %s: %s", want, body)
 		}
 	}
 

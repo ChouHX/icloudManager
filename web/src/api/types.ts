@@ -173,7 +173,7 @@ export interface TagImportResult {
   updated: number
   skipped: number
   invalid: number
-  entries: TagEntry[]
+  entries?: TagEntry[]
   errors: string[]
 }
 
