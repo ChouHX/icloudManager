@@ -1,5 +1,6 @@
 import { Button, Layout, Menu, Tooltip } from 'antd'
 import {
+  IdcardOutlined,
   InboxOutlined,
   LogoutOutlined,
   SafetyCertificateOutlined,
@@ -12,6 +13,7 @@ import { useAuth } from '../auth/useAuth'
 const NAV_ITEMS = [
   { key: '/aliases', icon: <TagsOutlined />, label: '创建别名' },
   { key: '/inbox', icon: <InboxOutlined />, label: '取件' },
+  { key: '/tags', icon: <IdcardOutlined />, label: '标签账号' },
   { key: '/accounts', icon: <SettingOutlined />, label: '账号设置' },
 ]
 

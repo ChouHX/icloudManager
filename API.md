@@ -683,6 +683,77 @@ X-CSRF-Token: <token>
 - 检测期间凭据发生变更：`409 ACCOUNT_CHANGED`，丢弃旧检测结果并提示重新检测。
 - 账号不存在：`404 ACCOUNT_NOT_FOUND`。
 
+### 5.12 标签凭据管理（独立于 iCloud 账号）
+
+用于记录「邮箱 / 网站密码 / 项目标签」，按项目区分账号的使用情况。
+该功能**与 iCloud 账号体系完全解耦**：不读取、不修改 `accounts.json`，
+也不参与任何 Hide My Email 流程，数据单独持久化到 `data/tags.json`（0600）。
+
+**列出记录**
+
+```http
+GET /api/tags
+```
+
+```json
+{
+  "success": true,
+  "data": {
+    "count": 1,
+    "tags": ["项目A", "游戏"],
+    "entries": [
+      {
+        "id": "tag_1a2b3c4d",
+        "email": "user@example.com",
+        "password": "p@ssw0rd",
+        "site": "GitHub",
+        "tags": ["项目A", "开发"],
+        "note": "公司项目",
+        "created_at": "2026-08-01T09:00:00+08:00",
+        "updated_at": "2026-08-02T09:00:00+08:00"
+      }
+    ]
+  }
+}
+```
+
+`tags` 是所有记录中出现过的去重标签，可直接用于筛选下拉框。
+
+**新增记录**
+
+```http
+POST /api/tags
+X-CSRF-Token: <token>
+
+{ "email": "user@example.com", "password": "p@ssw0rd", "site": "GitHub", "tags": ["项目A"], "note": "" }
+```
+
+`email` 必填且需为合法邮箱；`password`、`site`、`tags`、`note` 可选。
+`tags` 会自动去空白、忽略大小写去重，最多 20 个、每个最长 32 字符。
+成功返回创建后的记录对象。
+
+**更新记录**
+
+```http
+PUT /api/tags/:id
+X-CSRF-Token: <token>
+```
+
+请求体字段与新增一致，会整体覆盖。记录不存在返回 `400 VALIDATION_ERROR`。
+
+**删除记录**
+
+```http
+DELETE /api/tags/:id
+X-CSRF-Token: <token>
+```
+
+```json
+{ "success": true, "data": { "id": "tag_1a2b3c4d" } }
+```
+
+记录不存在返回 `404 TAG_NOT_FOUND`。删除仅影响本地记录，不影响任何网站账号。
+
 ---
 
 ## 6. 已知限制

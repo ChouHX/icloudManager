@@ -8,6 +8,7 @@ import AliasesPage from './pages/AliasesPage'
 import InboxPage from './pages/InboxPage'
 import AccountsPage from './pages/AccountsPage'
 import PublicInboxPage from './pages/PublicInboxPage'
+import TagsPage from './pages/TagsPage'
 
 /** 受保护区域：会话未确定前显示加载，未登录跳转登录页 */
 function ProtectedLayout() {
@@ -50,6 +51,7 @@ export default function App() {
             <Route path="/aliases" element={<AliasesPage />} />
             <Route path="/inbox" element={<InboxPage />} />
             <Route path="/accounts" element={<AccountsPage />} />
+            <Route path="/tags" element={<TagsPage />} />
             <Route path="*" element={<Navigate to="/aliases" replace />} />
           </Route>
         </Routes>

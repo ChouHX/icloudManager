@@ -86,6 +86,29 @@ const AUTO_ACCOUNT_BACKUP = {
   last_error: '创建别名失败: HTTP 429: Too Many Requests',
 }
 
+export const TAG_ENTRIES = [
+  {
+    id: 'tag_1',
+    email: 'user@example.com',
+    password: 's3cret-pass',
+    site: 'GitHub',
+    tags: ['项目A', '开发'],
+    note: '公司项目',
+    created_at: '2026-08-01T09:00:00+08:00',
+    updated_at: '2026-08-02T09:00:00+08:00',
+  },
+  {
+    id: 'tag_2',
+    email: 'gamer@example.com',
+    password: 'game-pass',
+    site: 'Steam',
+    tags: ['游戏'],
+    note: '',
+    created_at: '2026-08-03T09:00:00+08:00',
+    updated_at: '2026-08-03T09:00:00+08:00',
+  },
+]
+
 export const handlers = [
   http.post('/api/auth/login', () =>
     HttpResponse.json({ success: true, data: { csrf_token: 'csrf-token', expires_at: '2026-08-05T22:00:00+08:00' } }),
@@ -95,6 +118,37 @@ export const handlers = [
   ),
   http.post('/api/auth/logout', () => HttpResponse.json({ success: true, data: { logged_out: true } })),
   http.get('/api/accounts', () => HttpResponse.json({ success: true, data: [ACCOUNT] })),
+  http.get('/api/tags', () =>
+    HttpResponse.json({
+      success: true,
+      data: {
+        count: TAG_ENTRIES.length,
+        tags: ['项目A', '开发', '游戏'],
+        entries: TAG_ENTRIES,
+      },
+    }),
+  ),
+  http.post('/api/tags', () =>
+    HttpResponse.json({
+      success: true,
+      data: {
+        id: 'tag_3',
+        email: 'new@example.com',
+        password: '',
+        site: '',
+        tags: ['项目B'],
+        note: '',
+        created_at: '2026-08-06T10:00:00+08:00',
+        updated_at: '2026-08-06T10:00:00+08:00',
+      },
+    }),
+  ),
+  http.put('/api/tags/:id', () =>
+    HttpResponse.json({ success: true, data: TAG_ENTRIES[0] }),
+  ),
+  http.delete('/api/tags/:id', () =>
+    HttpResponse.json({ success: true, data: { id: 'tag_1' } }),
+  ),
   http.get('/api/aliases', () =>
     HttpResponse.json({ success: true, data: { account_id: ACCOUNT.id, count: ALIASES.length, aliases: ALIASES } }),
   ),

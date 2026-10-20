@@ -122,6 +122,39 @@ export interface LoginResult {
   expires_at: string
 }
 
+/**
+ * 标签凭据记录——独立的「邮箱/密码 + 项目标签」管理，与 iCloud 账号无关。
+ */
+export interface TagEntry {
+  id: string
+  email: string
+  password?: string
+  /** 网站/服务名称，如 GitHub、Steam */
+  site?: string
+  /** 使用过该账号的项目标签 */
+  tags: string[]
+  note?: string
+  created_at: string
+  updated_at: string
+}
+
+/** 标签凭据列表结果 */
+export interface TagListResult {
+  count: number
+  /** 所有记录中出现过的去重标签 */
+  tags: string[]
+  entries: TagEntry[]
+}
+
+/** 创建/更新标签凭据的输入 */
+export interface TagEntryInput {
+  email: string
+  password: string
+  site: string
+  tags: string[]
+  note: string
+}
+
 /** 后台自动建满任务的一条日志 */
 export interface AutoCreateLog {
   time: string

@@ -29,6 +29,7 @@ import (
 	"icloud-hme/internal/hme"
 	"icloud-hme/internal/mail"
 	"icloud-hme/internal/share"
+	"icloud-hme/internal/tagstore"
 	"icloud-hme/internal/webui"
 )
 
@@ -52,6 +53,9 @@ type Server struct {
 
 	// 取件链接(见 share_handlers.go)
 	share *share.Store
+
+	// 标签凭据管理(独立于 iCloud 账号,见 tag_handlers.go)
+	tags *tagstore.Store
 
 	// 后台自动建满任务(全局单任务,见 autocreate.go)
 	autoMu sync.Mutex
@@ -90,10 +94,15 @@ func newWithBackend(be Backend, cfg Config) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	tagStore, err := tagstore.NewStore(dataDir)
+	if err != nil {
+		return nil, err
+	}
 	s := &Server{
 		be:      be,
 		auth:    authManager,
 		share:   shareStore,
+		tags:    tagStore,
 		limiter: auth.NewLimiter(nil, 15*time.Minute, 5, 10000),
 		cfg:     cfg,
 	}
@@ -165,6 +174,12 @@ func (s *Server) register() {
 			authed.GET("/autocreate", s.autoCreateStatusHandler)
 			authed.POST("/autocreate/start", csrfCheck(s.auth), s.startAutoCreateHandler)
 			authed.POST("/autocreate/stop", csrfCheck(s.auth), s.stopAutoCreateHandler)
+
+			// ===== 标签凭据管理(独立于 iCloud 账号) =====
+			authed.GET("/tags", s.listTagsHandler)
+			authed.POST("/tags", csrfCheck(s.auth), s.createTagHandler)
+			authed.PUT("/tags/:id", csrfCheck(s.auth), s.updateTagHandler)
+			authed.DELETE("/tags/:id", csrfCheck(s.auth), s.deleteTagHandler)
 
 			// ===== 系统 =====
 			authed.POST("/reload", csrfCheck(s.auth), s.reloadConfigHandler)

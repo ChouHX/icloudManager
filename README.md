@@ -6,7 +6,7 @@
 
 ## 功能特性
 
-- ✅ **极简中文界面** — 三个页面（创建别名 / 取件 / 账号设置），浏览器访问 `http://localhost:8081` 即开即用
+- ✅ **极简中文界面** — 四个页面（创建别名 / 取件 / 标签账号 / 账号设置），浏览器访问 `http://localhost:8081` 即开即用
 - ✅ **创建别名** — 一键生成 Hide My Email 地址，支持标签、复制、停用/激活/删除
 - ✅ **一键导出** — 按当前所选账号导出全部别名为 TXT，每行一个邮箱地址，文件名标明账号名称与 ID
 - ✅ **取件** — 按别名与时间范围筛选邮件；详情按 HTML 排版渲染（sandbox 隔离，脚本与追踪像素都不会生效），可一键切换纯文本，支持删除
@@ -14,6 +14,7 @@
 - ✅ **取件链接** — 为任意别名生成只读链接（`host:port/?token=xxx`），凭链接即可查看该别名的邮件，无需登录
 - ✅ **自动建满** — 后台按间隔自动创建别名直到达到目标总数，命中限流自动冷却续跑，界面可看进度与日志
 - ✅ **多账号管理** — 多账号并行，Cookie / App 密码 / 收件邮箱集中配置
+- ✅ **标签账号** — 独立于 iCloud 的「邮箱 / 网站密码 / 项目标签」记录，按项目区分账号使用情况，数据单独存放
 - ✅ **安全模型** — 单管理员会话、CSRF 校验、登录限流、响应脱敏、严格 CSP
 
 ## 快速开始
@@ -196,9 +197,10 @@ icloud-hme/
 │       ├── App.tsx            #   路由与登录态保护
 │       ├── api/               #   契约类型、fetch 封装、资源读取 hooks
 │       ├── components/        #   布局骨架与账号/凭据弹窗
-│       ├── pages/             #   创建别名、取件、账号设置、登录
+│       ├── pages/             #   创建别名、取件、标签账号、账号设置、登录
 │       └── test/              #   vitest + msw 测试基础设施
 ├── accounts.json           # 账号配置文件 (自动生成)
+├── tags.json               # 标签凭据配置 (自动生成,与账号无关)
 ├── go.mod
 └── internal/
     ├── account/
@@ -213,11 +215,16 @@ icloud-hme/
     ├── mail/
     │   ├── client.go       # IMAP 邮件客户端 (App Password 认证)
     │   └── web_client.go   # Web 邮件客户端 (Cookie 认证,无需 App Password)
+    ├── share/
+    │   └── store.go       # 别名取件链接 (只读分享)
+    ├── tagstore/
+    │   └── store.go       # 标签凭据管理 (邮箱/密码/项目标签,独立于 iCloud)
     ├── server/
     │   ├── server.go       # 路由分组 (认证 + CSRF)
     │   ├── backend.go      # 业务接口与 Manager 适配器
     │   ├── auth.go         # 登录/会话/退出 handler 与中间件
     │   ├── account_handlers.go  # 账号管理 handler
+    │   ├── tag_handlers.go # 标签凭据 handler
     │   └── middleware.go   # 安全响应头、请求上限
     └── webui/
         └── embed.go        # 内嵌前端资源 + SPA fallback
@@ -230,6 +237,7 @@ icloud-hme/
 - **hme.auth**: SRP 协议登录,支持账号密码 + 可选 2FA
 - **mail.Client**: IMAP 邮件客户端 (App Password,优先读邮件)
 - **mail.WebClient**: 通过 iCloud Web API (mccgateway) 读取邮件,无需 App Password
+- **tagstore.Store**: 独立于 iCloud 的标签凭据存储(邮箱/密码/项目标签),持久化到 `tags.json`
 - **server.Server**: HTTP API 服务 + 管理界面静态资源
 
 ## 技术栈
