@@ -754,6 +754,81 @@ X-CSRF-Token: <token>
 
 记录不存在返回 `404 TAG_NOT_FOUND`。删除仅影响本地记录，不影响任何网站账号。
 
+**批量导入**
+
+```http
+POST /api/tags/import
+X-CSRF-Token: <token>
+
+{
+  "text": "a@example.com----pass1----GitHub\nb@example.com----pass2\nc@example.com",
+  "tags": ["项目A"],
+  "site": "Steam",
+  "mode": "skip"
+}
+```
+
+`text` 每行一条记录，支持以下分隔方式：
+
+| 格式 | 示例 |
+| --- | --- |
+| 四个连字符 | `邮箱----密码----网站` |
+| 制表符 / 竖线 / 逗号 | `邮箱<TAB>密码`、`邮箱\|密码`、`邮箱,密码,网站` |
+| 英文冒号 | `邮箱:密码`（只按第一个冒号拆分） |
+| 空格 | `邮箱 密码` |
+| 仅邮箱 | `邮箱` |
+
+空行与以 `#` 开头的行会被忽略。字段两端成对的引号、`<...>` 会被自动去除。
+`tags` 会应用到本次导入的**所有**记录（去空白、忽略大小写去重）；
+`site` 是行内未指定网站时的默认值；`mode` 为 `skip`（默认，跳过已存在的「邮箱 + 网站」）
+或 `update`（覆盖密码并合并标签）。`password`、`site` 可留空。
+
+```json
+{
+  "success": true,
+  "data": {
+    "imported": 2,
+    "updated": 0,
+    "skipped": 1,
+    "invalid": 1,
+    "entries": [ /* 新增或更新的记录 */ ],
+    "errors": ["第 4 行: 邮箱地址格式无效"]
+  }
+}
+```
+
+解析或校验失败的行计入 `invalid`，行级错误最多返回 20 条。整个导入只落盘一次，
+保存失败会回滚内存状态并返回 `400 VALIDATION_ERROR`。
+
+**重命名标签（全局）**
+
+```http
+PUT /api/tag-labels/rename
+X-CSRF-Token: <token>
+
+{ "from": "开发", "to": "前端" }
+```
+
+```json
+{ "success": true, "data": { "changed": 2, "from": "开发", "to": "前端" } }
+```
+
+忽略大小写匹配 `from`，替换为 `to`（若目标标签已存在则自动去重），返回受影响的记录数。
+标签为空或新标签超长返回 `400 VALIDATION_ERROR`。
+
+**删除标签（全局）**
+
+```http
+DELETE /api/tag-labels/:name
+X-CSRF-Token: <token>
+```
+
+```json
+{ "success": true, "data": { "changed": 2, "tag": "前端" } }
+```
+
+从所有记录中移除该标签（不删除记录本身），返回受影响的记录数。
+
 ---
 
 ## 6. 已知限制

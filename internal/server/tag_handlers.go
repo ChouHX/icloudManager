@@ -6,6 +6,7 @@ package server
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"icloud-hme/internal/tagstore"
@@ -73,4 +74,56 @@ func (s *Server) deleteTagHandler(c *gin.Context) {
 		return
 	}
 	ok(c, gin.H{"id": id})
+}
+
+// importTagsHandler 处理 POST /api/tags/import,批量导入并给所有记录打上选定标签。
+func (s *Server) importTagsHandler(c *gin.Context) {
+	var req tagstore.ImportInput
+	if err := c.ShouldBindJSON(&req); err != nil {
+		failCode(c, http.StatusBadRequest, "VALIDATION_ERROR", "参数错误")
+		return
+	}
+	result, err := s.tags.Import(req)
+	if err != nil {
+		failCode(c, http.StatusBadRequest, "VALIDATION_ERROR", err.Error())
+		return
+	}
+	ok(c, result)
+}
+
+// renameTagLabelHandler 处理 PUT /api/tag-labels/rename,全局重命名一个标签。
+func (s *Server) renameTagLabelHandler(c *gin.Context) {
+	var req struct {
+		From string `json:"from"`
+		To   string `json:"to"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		failCode(c, http.StatusBadRequest, "VALIDATION_ERROR", "参数错误")
+		return
+	}
+	changed, err := s.tags.RenameTag(req.From, req.To)
+	if err != nil {
+		failCode(c, http.StatusBadRequest, "VALIDATION_ERROR", err.Error())
+		return
+	}
+	ok(c, gin.H{
+		"changed": changed,
+		"from":    strings.TrimSpace(req.From),
+		"to":      strings.TrimSpace(req.To),
+	})
+}
+
+// deleteTagLabelHandler 处理 DELETE /api/tag-labels/:name,从所有记录中移除标签。
+func (s *Server) deleteTagLabelHandler(c *gin.Context) {
+	name := c.Param("name")
+	if name == "" || len(name) > 256 {
+		failCode(c, http.StatusBadRequest, "VALIDATION_ERROR", "参数错误: 标签无效")
+		return
+	}
+	changed, err := s.tags.DeleteTag(name)
+	if err != nil {
+		failCode(c, http.StatusBadRequest, "VALIDATION_ERROR", err.Error())
+		return
+	}
+	ok(c, gin.H{"changed": changed, "tag": name})
 }

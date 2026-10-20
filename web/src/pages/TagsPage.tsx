@@ -22,11 +22,13 @@ import {
   PlusOutlined,
   ReloadOutlined,
   TagsOutlined,
+  UploadOutlined,
 } from '@ant-design/icons'
 import { ApiError, request } from '../api/client'
 import { useTags } from '../api/hooks'
 import type { TagEntry, TagEntryInput } from '../api/types'
 import { formatDateTime } from '../utils/format'
+import { TagImportModal, TagManageModal } from '../components/TagModals'
 
 /** 密码单元格:默认打码,可切换显示,支持一键复制 */
 function PasswordCell({ password }: { password?: string }) {
@@ -182,12 +184,25 @@ export default function TagsPage() {
   const { message } = AntdApp.useApp()
 
   const [formOpen, setFormOpen] = useState(false)
+  const [importOpen, setImportOpen] = useState(false)
+  const [manageOpen, setManageOpen] = useState(false)
   const [editing, setEditing] = useState<TagEntry | null>(null)
   const [search, setSearch] = useState('')
   const [selectedTags, setSelectedTags] = useState<string[]>([])
 
   const entries = useMemo(() => data?.entries ?? [], [data])
   const tagOptions = useMemo(() => data?.tags ?? [], [data])
+
+  const tagCounts = useMemo(() => {
+    const map: Record<string, number> = {}
+    for (const entry of entries) {
+      for (const tag of entry.tags) {
+        const key = tag.toLowerCase()
+        map[key] = (map[key] ?? 0) + 1
+      }
+    }
+    return map
+  }, [entries])
 
   const rows = useMemo(() => {
     const keyword = search.trim().toLowerCase()
@@ -306,16 +321,24 @@ export default function TagsPage() {
           <h2>标签账号</h2>
           <p>记录邮箱、网站密码与项目标签，按项目区分账号使用情况（与 iCloud 账号无关）</p>
         </div>
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={() => {
-            setEditing(null)
-            setFormOpen(true)
-          }}
-        >
-          添加记录
-        </Button>
+        <Space wrap>
+          <Button icon={<UploadOutlined />} onClick={() => setImportOpen(true)}>
+            批量导入
+          </Button>
+          <Button icon={<TagsOutlined />} onClick={() => setManageOpen(true)}>
+            标签管理
+          </Button>
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={() => {
+              setEditing(null)
+              setFormOpen(true)
+            }}
+          >
+            添加记录
+          </Button>
+        </Space>
       </div>
 
       <Card
@@ -397,6 +420,25 @@ export default function TagsPage() {
           reload()
         }}
       />
+
+      {importOpen && (
+        <TagImportModal
+          open
+          tagOptions={tagOptions}
+          onClose={() => setImportOpen(false)}
+          onImported={() => reload()}
+        />
+      )}
+
+      {manageOpen && (
+        <TagManageModal
+          open
+          tags={tagOptions}
+          counts={tagCounts}
+          onClose={() => setManageOpen(false)}
+          onChanged={() => reload()}
+        />
+      )}
     </div>
   )
 }

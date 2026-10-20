@@ -149,6 +149,26 @@ export const handlers = [
   http.delete('/api/tags/:id', () =>
     HttpResponse.json({ success: true, data: { id: 'tag_1' } }),
   ),
+  http.post('/api/tags/import', () =>
+    HttpResponse.json({
+      success: true,
+      data: {
+        imported: 2,
+        updated: 0,
+        skipped: 1,
+        invalid: 1,
+        entries: TAG_ENTRIES,
+        errors: ['第 4 行: 邮箱格式不正确'],
+      },
+    }),
+  ),
+  http.put('/api/tag-labels/rename', async ({ request }) => {
+    const body = (await request.json()) as { from: string; to: string }
+    return HttpResponse.json({ success: true, data: { changed: 1, from: body.from, to: body.to } })
+  }),
+  http.delete('/api/tag-labels/:name', () =>
+    HttpResponse.json({ success: true, data: { changed: 1, tag: '开发' } }),
+  ),
   http.get('/api/aliases', () =>
     HttpResponse.json({ success: true, data: { account_id: ACCOUNT.id, count: ALIASES.length, aliases: ALIASES } }),
   ),

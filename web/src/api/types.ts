@@ -155,6 +155,35 @@ export interface TagEntryInput {
   note: string
 }
 
+/** 批量导入标签凭据的输入 */
+export interface TagImportInput {
+  /** 每行一条记录 */
+  text: string
+  /** 应用到本次导入所有记录的标签 */
+  tags: string[]
+  /** 行内未指定网站时使用的默认网站 */
+  site: string
+  /** skip: 跳过已存在(默认);update: 覆盖更新并合并标签 */
+  mode: 'skip' | 'update'
+}
+
+/** 批量导入结果 */
+export interface TagImportResult {
+  imported: number
+  updated: number
+  skipped: number
+  invalid: number
+  entries: TagEntry[]
+  errors: string[]
+}
+
+/** 标签重命名结果 */
+export interface TagRenameResult {
+  changed: number
+  from: string
+  to: string
+}
+
 /** 后台自动建满任务的一条日志 */
 export interface AutoCreateLog {
   time: string

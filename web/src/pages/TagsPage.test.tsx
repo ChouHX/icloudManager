@@ -84,4 +84,47 @@ describe('TagsPage', { timeout: 15000 }, () => {
     await user.click(confirm)
     expect(await screen.findByText('记录已删除')).toBeInTheDocument()
   })
+
+  it('批量导入账号并统一打标签', async () => {
+    const user = userEvent.setup()
+    renderTags()
+    await screen.findByText('user@example.com')
+
+    await user.click(screen.getByRole('button', { name: /批量导入/ }))
+    const dialog = await screen.findByRole('dialog')
+
+    await user.type(
+      within(dialog).getByLabelText('账号列表'),
+      'a@example.com----pass1\nb@example.com----pass2',
+    )
+    await user.type(within(dialog).getByRole('combobox'), '项目C')
+    await user.keyboard('{Enter}')
+    await user.click(within(dialog).getByRole('button', { name: /开始导入/ }))
+
+    expect(await within(dialog).findByText('导入完成')).toBeInTheDocument()
+    expect(within(dialog).getByText('新增')).toBeInTheDocument()
+    expect(within(dialog).getByText('第 4 行: 邮箱格式不正确')).toBeInTheDocument()
+  })
+
+  it('标签管理支持重命名标签', async () => {
+    const user = userEvent.setup()
+    renderTags()
+    await screen.findByText('user@example.com')
+
+    await user.click(screen.getByRole('button', { name: /标签管理/ }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getAllByText('使用记录数').length).toBeGreaterThan(0)
+
+    const row = within(dialog)
+      .getAllByRole('row')
+      .find((r) => within(r).queryByText('开发') && within(r).queryByRole('button', { name: /重命名/ }))
+    expect(row).toBeTruthy()
+    await user.click(within(row!).getByRole('button', { name: /重命名/ }))
+    const input = within(row!).getByRole('textbox')
+    await user.clear(input)
+    await user.type(input, '前端')
+    await user.click(within(row!).getByRole('button', { name: /保\s*存/ }))
+
+    expect(await screen.findByText(/已将「开发」重命名为「前端」/)).toBeInTheDocument()
+  })
 })

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -166,4 +167,99 @@ func extractEntryID(t *testing.T, body string) string {
 		return ""
 	}
 	return out.Data.Entries[0].ID
+}
+
+func tagAuthed(t *testing.T, ts *httptest.Server, sess, csrf, method, path, body string) *http.Request {
+	t.Helper()
+	req := authedReq(t, ts, method, path, body)
+	req.AddCookie(&http.Cookie{Name: "hme_session", Value: sess})
+	if method != "GET" {
+		req.Header.Set("X-CSRF-Token", csrf)
+	}
+	return req
+}
+
+// TestTagsImport 验证批量导入会统一打标签,并处理重复与非法行。
+func TestTagsImport(t *testing.T) {
+	s := mustServer(t, &fakeBackend{}, Config{
+		AdminPassword: "admin-pass-2026-strong",
+		DataDir:       t.TempDir(),
+	})
+	ts := httptest.NewServer(s.Handler())
+	defer ts.Close()
+	sess, csrf := login(t, ts, "admin-pass-2026-strong")
+
+	// 缺少 CSRF 应 403
+	req := tagAuthed(t, ts, sess, csrf, "POST", "/api/tags/import", `{"text":"a@example.com"}`)
+	req.Header.Del("X-CSRF-Token")
+	if status, _, _ := do(t, req); status != http.StatusForbidden {
+		t.Fatalf("缺少 CSRF 应 403,得到 %d", status)
+	}
+
+	payload := `{"text":"a@example.com----p1----GitHub\nb@example.com----p2\nnot-an-email\n","tags":["项目A"],"site":"Steam"}`
+	status, body, _ := do(t, tagAuthed(t, ts, sess, csrf, "POST", "/api/tags/import", payload))
+	if status != http.StatusOK {
+		t.Fatalf("导入失败: %d %s", status, body)
+	}
+	for _, want := range []string{`"imported":2`, `"invalid":1`, `"项目A"`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("导入结果缺少 %s: %s", want, body)
+		}
+	}
+
+	// 再次导入相同数据默认跳过
+	status, body, _ = do(t, tagAuthed(t, ts, sess, csrf, "POST", "/api/tags/import", payload))
+	if status != http.StatusOK || !strings.Contains(body, `"skipped":2`) {
+		t.Fatalf("重复导入应跳过: %d %s", status, body)
+	}
+
+	// 空内容应报错
+	status, _, _ = do(t, tagAuthed(t, ts, sess, csrf, "POST", "/api/tags/import", `{"text":"  \n"}`))
+	if status != http.StatusBadRequest {
+		t.Fatalf("空内容应 400,得到 %d", status)
+	}
+}
+
+// TestTagLabelsRenameAndDelete 验证标签的全局重命名与删除。
+func TestTagLabelsRenameAndDelete(t *testing.T) {
+	s := mustServer(t, &fakeBackend{}, Config{
+		AdminPassword: "admin-pass-2026-strong",
+		DataDir:       t.TempDir(),
+	})
+	ts := httptest.NewServer(s.Handler())
+	defer ts.Close()
+	sess, csrf := login(t, ts, "admin-pass-2026-strong")
+
+	if status, body, _ := do(t, tagAuthed(t, ts, sess, csrf, "POST", "/api/tags", `{"email":"a@example.com","tags":["开发"]}`)); status != http.StatusOK {
+		t.Fatalf("创建失败: %d %s", status, body)
+	}
+	if status, body, _ := do(t, tagAuthed(t, ts, sess, csrf, "POST", "/api/tags", `{"email":"b@example.com","tags":["开发"]}`)); status != http.StatusOK {
+		t.Fatalf("创建失败: %d %s", status, body)
+	}
+
+	// 重命名
+	status, body, _ := do(t, tagAuthed(t, ts, sess, csrf, "PUT", "/api/tag-labels/rename", `{"from":"开发","to":"前端"}`))
+	if status != http.StatusOK || !strings.Contains(body, `"changed":2`) {
+		t.Fatalf("重命名失败: %d %s", status, body)
+	}
+	status, body, _ = do(t, tagAuthed(t, ts, sess, csrf, "GET", "/api/tags", ""))
+	if status != http.StatusOK || !strings.Contains(body, `"前端"`) || strings.Contains(body, `"开发"`) {
+		t.Fatalf("重命名未生效: %d %s", status, body)
+	}
+
+	// 删除标签
+	status, body, _ = do(t, tagAuthed(t, ts, sess, csrf, "DELETE", "/api/tag-labels/"+url.PathEscape("前端"), ""))
+	if status != http.StatusOK || !strings.Contains(body, `"changed":2`) {
+		t.Fatalf("删除标签失败: %d %s", status, body)
+	}
+	status, body, _ = do(t, tagAuthed(t, ts, sess, csrf, "GET", "/api/tags", ""))
+	if status != http.StatusOK || !strings.Contains(body, `"tags":[]`) {
+		t.Fatalf("标签应被清空: %d %s", status, body)
+	}
+
+	// 重命名缺少参数应 400
+	status, _, _ = do(t, tagAuthed(t, ts, sess, csrf, "PUT", "/api/tag-labels/rename", `{"from":"","to":"x"}`))
+	if status != http.StatusBadRequest {
+		t.Fatalf("空标签应 400,得到 %d", status)
+	}
 }
