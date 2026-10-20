@@ -33,11 +33,13 @@ import type {
   TagBatchInput,
   TagBatchResult,
   TagEntry,
+  TagExportInput,
   TagImportInput,
   TagImportResult,
   TagRestoreInput,
   TagRestoreResult,
 } from '../api/types'
+import { backupFileName, downloadCSV, downloadJSON, exportFileName } from '../utils/exportTags'
 
 const IMPORT_FORMAT_HELP =
   '每行一条记录，支持「邮箱----密码----网站」，也支持制表符、竖线、逗号、英文冒号或空格分隔；' +
@@ -386,25 +388,6 @@ function extractBackupEntries(parsed: unknown): TagEntry[] | null {
   return null
 }
 
-function downloadJSON(payload: unknown, filename: string): void {
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = filename
-  document.body.appendChild(link)
-  link.click()
-  link.remove()
-  URL.revokeObjectURL(url)
-}
-
-function backupFileName(exportedAt: string): string {
-  const stamp = (exportedAt || new Date().toISOString())
-    .replace(/[:.]/g, '-')
-    .replace(/\+.*$/, '')
-  return `tags-backup-${stamp}.json`
-}
-
 /** 备份导出 / 导入,用于跨实例迁移数据 */
 export function TagBackupModal({
   open,
@@ -597,6 +580,135 @@ const BATCH_ACTION_HELP: Record<TagBatchAction, string> = {
   add: '保留记录原有的标签，只追加这里填写的标签（已存在则自动跳过）。',
   remove: '只删除这里填写的标签，记录的其他标签保持不变。',
   replace: '先清空这些记录的全部标签，再写入这里填写的标签。',
+}
+
+/** 批量导出勾选 / 筛选 / 全部记录,可选 CSV 或可重新导入的 JSON */
+export function TagExportModal({
+  open,
+  filteredCount,
+  totalCount,
+  selectedIds,
+  filter,
+  filterActive,
+  onClose,
+}: {
+  open: boolean
+  filteredCount: number
+  totalCount: number
+  selectedIds: string[]
+  filter: TagBatchFilter
+  filterActive: boolean
+  onClose: () => void
+}) {
+  const { message } = AntdApp.useApp()
+  const [scope, setScope] = useState<'ids' | 'filter' | 'all'>(
+    selectedIds.length > 0 ? 'ids' : filterActive ? 'filter' : 'all',
+  )
+  const [format, setFormat] = useState<'csv' | 'json'>('csv')
+  const [exporting, setExporting] = useState(false)
+  const [error, setError] = useState('')
+
+  const targetCount =
+    scope === 'ids' ? selectedIds.length : scope === 'filter' ? filteredCount : totalCount
+
+  async function handleExport() {
+    if (scope === 'ids' && selectedIds.length === 0) {
+      setError('请先在列表中勾选要导出的记录')
+      return
+    }
+    if (scope === 'filter' && !filterActive) {
+      setError('当前没有筛选条件，请选择「全部记录」或先设置筛选条件')
+      return
+    }
+    if (targetCount === 0) {
+      setError('当前范围没有可导出的记录，请先调整范围')
+      return
+    }
+    const body: TagExportInput =
+      scope === 'ids' ? { ids: selectedIds } : scope === 'filter' ? { filter } : {}
+    setExporting(true)
+    setError('')
+    try {
+      const backup = await request<TagBackup>('/api/tags/export', { method: 'POST', body })
+      if (format === 'csv') {
+        downloadCSV(backup.entries ?? [], exportFileName(backup.exported_at, 'csv'))
+      } else {
+        downloadJSON(backup, exportFileName(backup.exported_at, 'json'))
+      }
+      message.success(`已导出 ${backup.count} 条记录`)
+      onClose()
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : '导出失败，请重试')
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  return (
+    <Modal
+      open={open}
+      title="批量导出"
+      width={560}
+      onCancel={onClose}
+      destroyOnHidden
+      mask={{ closable: false }}
+      okText="导出"
+      cancelText="取消"
+      confirmLoading={exporting}
+      onOk={() => void handleExport()}
+    >
+      {error && <Alert type="error" showIcon title={error} style={{ marginBottom: 16 }} />}
+
+      <Space direction="vertical" size={18} style={{ width: '100%' }}>
+        <div>
+          <Typography.Text strong>导出范围</Typography.Text>
+          <Radio.Group
+            value={scope}
+            onChange={(e) => setScope(e.target.value as 'ids' | 'filter' | 'all')}
+            style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}
+          >
+            <Radio value="ids" disabled={selectedIds.length === 0}>
+              已勾选的记录（{selectedIds.length} 条）
+            </Radio>
+            <Radio value="filter" disabled={!filterActive}>
+              当前筛选结果（{filteredCount} 条）
+            </Radio>
+            <Radio value="all">全部记录（{totalCount} 条）</Radio>
+          </Radio.Group>
+          {!filterActive && (
+            <Typography.Text type="secondary">
+              当前没有筛选条件，可使用「全部记录」导出。
+            </Typography.Text>
+          )}
+        </div>
+
+        <div>
+          <Typography.Text strong>文件格式</Typography.Text>
+          <Radio.Group
+            value={format}
+            onChange={(e) => setFormat(e.target.value as 'csv' | 'json')}
+            style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}
+          >
+            <Radio value="csv">CSV 表格（Excel / WPS）</Radio>
+            <Radio value="json">JSON 备份（可重新导入）</Radio>
+          </Radio.Group>
+          <Typography.Paragraph type="secondary" style={{ margin: '8px 0 0' }}>
+            {format === 'csv'
+              ? '包含邮箱、密码、网站、项目标签、备注与时间，适合在表格软件中查看。'
+              : '包含完整记录，可在「备份迁移」中恢复。'}
+          </Typography.Paragraph>
+        </div>
+
+        <Alert
+          type="warning"
+          showIcon
+          title="导出文件包含明文密码"
+          description="请妥善保管，避免通过不安全的渠道传输。"
+        />
+        <Alert type="info" showIcon title={`将导出 ${targetCount} 条记录`} />
+      </Space>
+    </Modal>
+  )
 }
 
 /** 按筛选结果或勾选记录批量追加/移除/覆盖标签 */

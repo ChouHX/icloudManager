@@ -513,3 +513,73 @@ func TestTagsBatchByFilterAndIDs(t *testing.T) {
 		t.Fatalf("非法时间参数应 400,得到 %d", status)
 	}
 }
+
+// TestTagsExportSelection 验证按勾选 ID、筛选条件和全部记录导出。
+func TestTagsExportSelection(t *testing.T) {
+	s := mustServer(t, &fakeBackend{}, Config{
+		AdminPassword: "admin-pass-2026-strong",
+		DataDir:       t.TempDir(),
+	})
+	ts := httptest.NewServer(s.Handler())
+	defer ts.Close()
+	sess, csrf := login(t, ts, "admin-pass-2026-strong")
+
+	ids := make([]string, 0, 3)
+	for _, payload := range []string{
+		`{"email":"a@example.com","password":"p1","site":"GitHub","tags":["项目A"]}`,
+		`{"email":"b@example.com","site":"GitHub"}`,
+		`{"email":"c@example.com","site":"Steam"}`,
+	} {
+		status, body, _ := do(t, tagAuthed(t, ts, sess, csrf, "POST", "/api/tags", payload))
+		if status != http.StatusOK {
+			t.Fatalf("创建失败: %d %s", status, body)
+		}
+		var created struct {
+			Data struct {
+				ID string `json:"id"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal([]byte(body), &created); err != nil {
+			t.Fatalf("解析创建响应: %v", err)
+		}
+		ids = append(ids, created.Data.ID)
+	}
+
+	// 按勾选 ID 导出。
+	status, body, _ := do(t, tagAuthed(t, ts, sess, csrf, "POST", "/api/tags/export", `{"ids":["`+ids[0]+`"]}`))
+	if status != http.StatusOK || !strings.Contains(body, `"count":1`) {
+		t.Fatalf("按 ID 导出失败: %d %s", status, body)
+	}
+	if !strings.Contains(body, "a@example.com") || strings.Contains(body, "b@example.com") || strings.Contains(body, "c@example.com") {
+		t.Fatalf("按 ID 导出内容不符: %s", body)
+	}
+
+	// 按筛选条件导出。
+	status, body, _ = do(t, tagAuthed(t, ts, sess, csrf, "POST", "/api/tags/export", `{"filter":{"site":"GitHub"}}`))
+	if status != http.StatusOK || !strings.Contains(body, `"count":2`) {
+		t.Fatalf("按筛选导出失败: %d %s", status, body)
+	}
+	if !strings.Contains(body, "a@example.com") || !strings.Contains(body, "b@example.com") || strings.Contains(body, "c@example.com") {
+		t.Fatalf("按筛选导出内容不符: %s", body)
+	}
+
+	// 无条件导出全部。
+	status, body, _ = do(t, tagAuthed(t, ts, sess, csrf, "POST", "/api/tags/export", `{}`))
+	if status != http.StatusOK || !strings.Contains(body, `"count":3`) {
+		t.Fatalf("全部导出失败: %d %s", status, body)
+	}
+
+	// 非法时间参数应 400。
+	status, _, _ = do(t, tagAuthed(t, ts, sess, csrf, "POST", "/api/tags/export",
+		`{"filter":{"created_from":"2026-08-02T00:00:00+08:00","created_to":"2026-08-01T00:00:00+08:00"}}`))
+	if status != http.StatusBadRequest {
+		t.Fatalf("非法时间参数应 400,得到 %d", status)
+	}
+
+	// 缺少 CSRF 应 403。
+	req := tagAuthed(t, ts, sess, csrf, "POST", "/api/tags/export", `{}`)
+	req.Header.Del("X-CSRF-Token")
+	if status, _, _ := do(t, req); status != http.StatusForbidden {
+		t.Fatalf("缺少 CSRF 应 403,得到 %d", status)
+	}
+}

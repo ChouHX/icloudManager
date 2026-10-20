@@ -706,28 +706,37 @@ func buildWhere(q ListQuery) (string, []any) {
 // tagsForIDs 批量读取若干记录的标签,按 ord 保持原始顺序。
 func (s *Store) tagsForIDs(ids []string) (map[string][]string, error) {
 	out := make(map[string][]string, len(ids))
-	if len(ids) == 0 {
-		return out, nil
-	}
-	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
-	args := make([]any, len(ids))
-	for i, id := range ids {
-		args[i] = id
-	}
-	rows, err := s.db.Query(`SELECT entry_id, tag FROM entry_tags
-		WHERE entry_id IN (`+placeholders+`) ORDER BY entry_id, ord`, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	for rows.Next() {
-		var id, tag string
-		if err := rows.Scan(&id, &tag); err != nil {
+	for start := 0; start < len(ids); start += 500 {
+		end := start + 500
+		if end > len(ids) {
+			end = len(ids)
+		}
+		chunk := ids[start:end]
+		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(chunk)), ",")
+		args := make([]any, len(chunk))
+		for i, id := range chunk {
+			args[i] = id
+		}
+		rows, err := s.db.Query(`SELECT entry_id, tag FROM entry_tags
+			WHERE entry_id IN (`+placeholders+`) ORDER BY entry_id, ord`, args...)
+		if err != nil {
 			return nil, err
 		}
-		out[id] = append(out[id], tag)
+		for rows.Next() {
+			var id, tag string
+			if err := rows.Scan(&id, &tag); err != nil {
+				_ = rows.Close()
+				return nil, err
+			}
+			out[id] = append(out[id], tag)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		_ = rows.Close()
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // ==== SQL 执行器抽象,便于在 db / tx 之间复用 ====

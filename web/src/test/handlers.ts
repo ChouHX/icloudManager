@@ -256,6 +256,33 @@ export const handlers = [
   http.delete('/api/tag-labels/:name', () =>
     HttpResponse.json({ success: true, data: { changed: 1, tag: '开发' } }),
   ),
+  http.post('/api/tags/export', async ({ request }) => {
+    const body = (await request.json()) as {
+      ids?: string[]
+      filter?: {
+        search?: string
+        tags?: string[]
+        site?: string
+        created_from?: string
+        created_to?: string
+      }
+    }
+    const ids = body.ids ?? []
+    const entries =
+      ids.length > 0
+        ? TAG_ENTRIES.filter((entry) => ids.includes(entry.id))
+        : filterTagEntries(body.filter ?? {})
+    return HttpResponse.json({
+      success: true,
+      data: {
+        version: 1,
+        type: 'icloud-hme-tags',
+        exported_at: '2026-08-06T10:00:00+08:00',
+        count: entries.length,
+        entries,
+      },
+    })
+  }),
   http.get('/api/tags/export', () =>
     HttpResponse.json({
       success: true,

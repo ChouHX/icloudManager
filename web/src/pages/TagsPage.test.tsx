@@ -1,7 +1,7 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import TagsPage from './TagsPage'
 import { renderPage } from '../test/render'
 import { server } from '../test/server'
@@ -242,5 +242,69 @@ describe('TagsPage', { timeout: 30000 }, () => {
     expect(await within(dialog).findByText('导入完成')).toBeInTheDocument()
     expect(within(dialog).getByText('新增')).toBeInTheDocument()
     expect(within(dialog).getByText('跳过')).toBeInTheDocument()
+  })
+
+  it('批量导出支持勾选、筛选与全部记录', async () => {
+    const user = userEvent.setup()
+    renderTags()
+    await screen.findByText('user@example.com')
+
+    const createSpy = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:mock')
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    try {
+      // 多选导出：只包含勾选记录
+      const email = screen.getByText('user@example.com')
+      await user.click(within(email.closest('tr')!).getByRole('checkbox'))
+      await user.click(screen.getByRole('button', { name: /批量导出/ }))
+      let dialog = await screen.findByRole('dialog')
+      expect(within(dialog).getByText('已勾选的记录（1 条）')).toBeInTheDocument()
+      await user.click(within(dialog).getByRole('button', { name: /导\s*出/ }))
+      await waitFor(() => expect(createSpy).toHaveBeenCalledTimes(1))
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+
+      let blob = createSpy.mock.calls.at(-1)?.[0] as Blob
+      const bom = Array.from(new Uint8Array(await blob.arrayBuffer()).slice(0, 3))
+      expect(bom).toEqual([0xef, 0xbb, 0xbf])
+      let csv = await blob.text()
+      expect(csv).toContain('"user@example.com"')
+      expect(csv).not.toContain('gamer@example.com')
+
+      // 按筛选导出：只包含当前筛选结果
+      const toolbar = document.querySelector('.list-toolbar') as HTMLElement
+      const siteSelect = toolbar.querySelectorAll('.ant-select')[1] as HTMLElement
+      await user.click(within(siteSelect).getByRole('combobox'))
+      await user.click(await screen.findByTitle('GitHub'))
+      await waitFor(() => expect(screen.queryByText('gamer@example.com')).not.toBeInTheDocument())
+
+      await user.click(screen.getByRole('button', { name: /批量导出/ }))
+      dialog = await screen.findByRole('dialog')
+      expect(within(dialog).getByText('当前筛选结果（1 条）')).toBeInTheDocument()
+      await user.click(within(dialog).getByRole('button', { name: /导\s*出/ }))
+      await waitFor(() => expect(createSpy).toHaveBeenCalledTimes(2))
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+
+      blob = createSpy.mock.calls.at(-1)?.[0] as Blob
+      csv = await blob.text()
+      expect(csv).toContain('"user@example.com"')
+      expect(csv).not.toContain('gamer@example.com')
+
+      // 清空筛选后导出全部
+      await user.click(siteSelect.querySelector('.ant-select-clear') as HTMLElement)
+      await waitFor(() => expect(screen.getByText('gamer@example.com')).toBeInTheDocument())
+
+      await user.click(screen.getByRole('button', { name: /批量导出/ }))
+      dialog = await screen.findByRole('dialog')
+      expect(within(dialog).getByText('全部记录（2 条）')).toBeInTheDocument()
+      await user.click(within(dialog).getByRole('button', { name: /导\s*出/ }))
+      await waitFor(() => expect(createSpy).toHaveBeenCalledTimes(3))
+
+      blob = createSpy.mock.calls.at(-1)?.[0] as Blob
+      csv = await blob.text()
+      expect(csv).toContain('"user@example.com"')
+      expect(csv).toContain('"gamer@example.com"')
+    } finally {
+      createSpy.mockRestore()
+      clickSpy.mockRestore()
+    }
   })
 })

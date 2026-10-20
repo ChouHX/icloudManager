@@ -3,6 +3,7 @@ package tagstore
 import (
 	"database/sql"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 )
@@ -41,35 +42,74 @@ type RestoreResult struct {
 	Errors   []string `json:"errors"`
 }
 
+// ExportQuery 定义导出范围:IDs 非空时按记录 ID 导出,否则按 Filter 筛选;
+// 两者都为空时导出全部记录。
+type ExportQuery struct {
+	IDs    []string
+	Filter ListQuery
+}
+
 // Export 返回全部记录的备份快照,按创建时间排序,便于跨实例迁移。
 func (s *Store) Export() (Backup, error) {
+	return s.ExportQuery(ExportQuery{})
+}
+
+// ExportQuery 返回指定范围的备份快照,按创建时间排序,便于跨实例迁移或批量导出。
+func (s *Store) ExportQuery(in ExportQuery) (Backup, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	rows, err := s.db.Query(`SELECT id, email, password, site, note, created_at, updated_at
-		FROM entries ORDER BY created_at ASC, id ASC`)
-	if err != nil {
-		return Backup{}, err
-	}
-	defer func() { _ = rows.Close() }()
-
+	ids := dedupeIDs(in.IDs)
 	entries := make([]Entry, 0)
-	ids := make([]string, 0)
-	for rows.Next() {
-		var e Entry
-		if err := rows.Scan(&e.ID, &e.Email, &e.Password, &e.Site, &e.Note, &e.CreatedAt, &e.UpdatedAt); err != nil {
+	if len(ids) > 0 {
+		for start := 0; start < len(ids); start += 500 {
+			end := start + 500
+			if end > len(ids) {
+				end = len(ids)
+			}
+			chunk := ids[start:end]
+			placeholders := strings.TrimSuffix(strings.Repeat("?,", len(chunk)), ",")
+			args := make([]any, len(chunk))
+			for i, id := range chunk {
+				args[i] = id
+			}
+			rows, err := s.db.Query(`SELECT id, email, password, site, note, created_at, updated_at
+				FROM entries WHERE id IN (`+placeholders+`) ORDER BY created_at ASC, id ASC`, args...)
+			if err != nil {
+				return Backup{}, err
+			}
+			chunkEntries, err := scanExportRows(rows)
+			_ = rows.Close()
+			if err != nil {
+				return Backup{}, err
+			}
+			entries = append(entries, chunkEntries...)
+		}
+		sort.Slice(entries, func(i, j int) bool {
+			if entries[i].CreatedAt != entries[j].CreatedAt {
+				return entries[i].CreatedAt < entries[j].CreatedAt
+			}
+			return entries[i].ID < entries[j].ID
+		})
+	} else {
+		where, args := buildWhere(in.Filter)
+		rows, err := s.db.Query(`SELECT e.id, e.email, e.password, e.site, e.note, e.created_at, e.updated_at
+			FROM entries e `+where+` ORDER BY e.created_at ASC, e.id ASC`, args...)
+		if err != nil {
 			return Backup{}, err
 		}
-		e.Tags = []string{}
-		entries = append(entries, e)
-		ids = append(ids, e.ID)
+		entries, err = scanExportRows(rows)
+		_ = rows.Close()
+		if err != nil {
+			return Backup{}, err
+		}
 	}
-	if err := rows.Err(); err != nil {
-		return Backup{}, err
-	}
-	_ = rows.Close()
 
-	tags, err := s.tagsForIDs(ids)
+	entryIDs := make([]string, len(entries))
+	for i := range entries {
+		entryIDs[i] = entries[i].ID
+	}
+	tags, err := s.tagsForIDs(entryIDs)
 	if err != nil {
 		return Backup{}, err
 	}
@@ -85,6 +125,19 @@ func (s *Store) Export() (Backup, error) {
 		Count:      len(entries),
 		Entries:    entries,
 	}, nil
+}
+
+func scanExportRows(rows *sql.Rows) ([]Entry, error) {
+	entries := make([]Entry, 0)
+	for rows.Next() {
+		var e Entry
+		if err := rows.Scan(&e.ID, &e.Email, &e.Password, &e.Site, &e.Note, &e.CreatedAt, &e.UpdatedAt); err != nil {
+			return nil, err
+		}
+		e.Tags = []string{}
+		entries = append(entries, e)
+	}
+	return entries, rows.Err()
 }
 
 // Restore 从备份导入记录。

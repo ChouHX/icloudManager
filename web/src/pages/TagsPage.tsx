@@ -23,6 +23,7 @@ import {
   DeleteOutlined,
   DownloadOutlined,
   EditOutlined,
+  ExportOutlined,
   InfoCircleOutlined,
   PlusOutlined,
   ReloadOutlined,
@@ -34,7 +35,13 @@ import { ApiError, request } from '../api/client'
 import { useTags } from '../api/hooks'
 import type { TagBatchFilter, TagEntry, TagEntryInput } from '../api/types'
 import { formatDateTime } from '../utils/format'
-import { TagBackupModal, TagBatchModal, TagImportModal, TagManageModal } from '../components/TagModals'
+import {
+  TagBackupModal,
+  TagBatchModal,
+  TagExportModal,
+  TagImportModal,
+  TagManageModal,
+} from '../components/TagModals'
 
 /** 密码单元格:默认打码,可切换显示,支持一键复制 */
 function PasswordCell({ password }: { password?: string }) {
@@ -204,6 +211,7 @@ export default function TagsPage() {
   const [site, setSite] = useState('')
   const [dateRange, setDateRange] = useState<[Dayjs | null, Dayjs | null] | null>(null)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [exportOpen, setExportOpen] = useState(false)
 
   // 输入防抖,避免每敲一个字符都请求服务端
   useEffect(() => {
@@ -410,6 +418,13 @@ export default function TagsPage() {
           >
             批量打标签
           </Button>
+          <Button
+            icon={<ExportOutlined />}
+            onClick={() => setExportOpen(true)}
+            disabled={stats.total === 0}
+          >
+            批量导出
+          </Button>
           <Button icon={<TagsOutlined />} onClick={() => setManageOpen(true)}>
             标签管理
           </Button>
@@ -558,6 +573,18 @@ export default function TagsPage() {
             reload()
             setSelectedIds([])
           }}
+        />
+      )}
+
+      {exportOpen && (
+        <TagExportModal
+          open
+          filteredCount={data?.count ?? 0}
+          totalCount={stats.total}
+          selectedIds={selectedIds}
+          filter={batchFilter}
+          filterActive={hasFilters}
+          onClose={() => setExportOpen(false)}
         />
       )}
 

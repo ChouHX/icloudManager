@@ -148,3 +148,65 @@ func TestRestoreRegeneratesConflictingID(t *testing.T) {
 		t.Fatal("ID 冲突时应重新生成")
 	}
 }
+
+func TestExportQueryByIDsAndFilter(t *testing.T) {
+	store := newTestStore(t)
+	a, err := store.Create(Input{
+		Email:    "a@example.com",
+		Password: "p1",
+		Site:     "GitHub",
+		Tags:     []string{"项目A"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Create(Input{Email: "b@example.com", Site: "GitHub", Tags: []string{"项目B"}}); err != nil {
+		t.Fatal(err)
+	}
+	c, err := store.Create(Input{Email: "c@example.com", Site: "Steam", Tags: []string{"游戏"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 按 ID 导出:去重、忽略不存在的 ID,并保留标签。
+	byIDs, err := store.ExportQuery(ExportQuery{IDs: []string{c.ID, a.ID, a.ID, "missing"}})
+	if err != nil {
+		t.Fatalf("ExportQuery by IDs: %v", err)
+	}
+	if byIDs.Count != 2 || len(byIDs.Entries) != 2 {
+		t.Fatalf("按 ID 导出数量不符: %+v", byIDs)
+	}
+	emails := map[string]Entry{}
+	for _, entry := range byIDs.Entries {
+		emails[entry.Email] = entry
+	}
+	if _, ok := emails["b@example.com"]; ok {
+		t.Fatalf("未选中的记录不应被导出: %+v", byIDs.Entries)
+	}
+	if got := emails["a@example.com"]; len(got.Tags) != 1 || got.Tags[0] != "项目A" {
+		t.Fatalf("按 ID 导出标签丢失: %+v", got)
+	}
+
+	// 按筛选条件导出。
+	byFilter, err := store.ExportQuery(ExportQuery{Filter: ListQuery{Site: "github"}})
+	if err != nil {
+		t.Fatalf("ExportQuery by filter: %v", err)
+	}
+	if byFilter.Count != 2 {
+		t.Fatalf("按筛选导出数量不符: %+v", byFilter)
+	}
+	for _, entry := range byFilter.Entries {
+		if entry.Email == "c@example.com" {
+			t.Fatalf("不符合筛选的记录不应被导出: %+v", byFilter.Entries)
+		}
+	}
+
+	// 无条件导出全部。
+	all, err := store.ExportQuery(ExportQuery{})
+	if err != nil {
+		t.Fatalf("ExportQuery all: %v", err)
+	}
+	if all.Count != 3 || len(all.Entries) != 3 {
+		t.Fatalf("全部导出数量不符: %+v", all)
+	}
+}

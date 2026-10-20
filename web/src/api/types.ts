@@ -202,6 +202,12 @@ export interface TagBatchResult {
   tags: string[]
 }
 
+/** 按勾选 ID 或筛选条件批量导出的输入;两者都为空时导出全部 */
+export interface TagExportInput {
+  ids?: string[]
+  filter?: TagBatchFilter
+}
+
 /** 创建/更新标签凭据的输入 */
 export interface TagEntryInput {
   email: string

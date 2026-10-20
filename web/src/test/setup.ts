@@ -32,6 +32,14 @@ if (!window.HTMLElement.prototype.scrollIntoView) {
   window.HTMLElement.prototype.scrollIntoView = vi.fn()
 }
 
+// jsdom 未实现 Blob URL API，导出功能测试需要。
+if (!URL.createObjectURL) {
+  URL.createObjectURL = () => 'blob:mock'
+}
+if (!URL.revokeObjectURL) {
+  URL.revokeObjectURL = () => {}
+}
+
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
 afterEach(() => {
   cleanup()

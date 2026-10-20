@@ -102,19 +102,32 @@ func parseTagFilters(values []string) []string {
 	return out
 }
 
+// tagFilterRequest 是批量操作与导出共用的筛选参数。
+type tagFilterRequest struct {
+	Search      string   `json:"search"`
+	Tags        []string `json:"tags"`
+	Site        string   `json:"site"`
+	CreatedFrom string   `json:"created_from"`
+	CreatedTo   string   `json:"created_to"`
+}
+
+func (f tagFilterRequest) listQuery() tagstore.ListQuery {
+	return tagstore.ListQuery{
+		Search:      f.Search,
+		Tags:        f.Tags,
+		Site:        f.Site,
+		CreatedFrom: f.CreatedFrom,
+		CreatedTo:   f.CreatedTo,
+	}
+}
+
 // batchTagsHandler 处理 POST /api/tags/batch,按 ID 或筛选条件批量修改标签。
 func (s *Server) batchTagsHandler(c *gin.Context) {
 	var req struct {
-		IDs    []string `json:"ids"`
-		Filter struct {
-			Search      string   `json:"search"`
-			Tags        []string `json:"tags"`
-			Site        string   `json:"site"`
-			CreatedFrom string   `json:"created_from"`
-			CreatedTo   string   `json:"created_to"`
-		} `json:"filter"`
-		Action string   `json:"action"`
-		Tags   []string `json:"tags"`
+		IDs    []string         `json:"ids"`
+		Filter tagFilterRequest `json:"filter"`
+		Action string           `json:"action"`
+		Tags   []string         `json:"tags"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		failCode(c, http.StatusBadRequest, "VALIDATION_ERROR", "参数错误")
@@ -126,14 +139,8 @@ func (s *Server) batchTagsHandler(c *gin.Context) {
 	}
 
 	result, err := s.tags.BatchTag(tagstore.BatchInput{
-		IDs: req.IDs,
-		Filter: tagstore.ListQuery{
-			Search:      req.Filter.Search,
-			Tags:        req.Filter.Tags,
-			Site:        req.Filter.Site,
-			CreatedFrom: req.Filter.CreatedFrom,
-			CreatedTo:   req.Filter.CreatedTo,
-		},
+		IDs:    req.IDs,
+		Filter: req.Filter.listQuery(),
 		Action: req.Action,
 		Tags:   req.Tags,
 	})
@@ -280,9 +287,37 @@ func (s *Server) deleteTagLabelHandler(c *gin.Context) {
 	ok(c, gin.H{"changed": changed, "tag": name})
 }
 
-// exportTagsHandler 处理 GET /api/tags/export,返回可迁移的备份文档。
+// exportTagsHandler 处理 GET /api/tags/export,返回全部记录的可迁移备份文档。
 func (s *Server) exportTagsHandler(c *gin.Context) {
 	backup, err := s.tags.Export()
+	if err != nil {
+		failCode(c, http.StatusInternalServerError, "INTERNAL_ERROR", "导出备份失败")
+		return
+	}
+	ok(c, backup)
+}
+
+// exportTagsSelectionHandler 处理 POST /api/tags/export,按 ID 或筛选条件导出备份。
+//
+// 请求体中的 IDs 非空时优先按 ID 导出;否则按 Filter 筛选;两者都为空时导出全部。
+func (s *Server) exportTagsSelectionHandler(c *gin.Context) {
+	var req struct {
+		IDs    []string         `json:"ids"`
+		Filter tagFilterRequest `json:"filter"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		failCode(c, http.StatusBadRequest, "VALIDATION_ERROR", "参数错误")
+		return
+	}
+	if err := validateTimeRange(req.Filter.CreatedFrom, req.Filter.CreatedTo); err != nil {
+		failCode(c, http.StatusBadRequest, "VALIDATION_ERROR", err.Error())
+		return
+	}
+
+	backup, err := s.tags.ExportQuery(tagstore.ExportQuery{
+		IDs:    req.IDs,
+		Filter: req.Filter.listQuery(),
+	})
 	if err != nil {
 		failCode(c, http.StatusInternalServerError, "INTERNAL_ERROR", "导出备份失败")
 		return
