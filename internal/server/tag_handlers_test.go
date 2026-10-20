@@ -108,9 +108,13 @@ func TestTagsCRUD(t *testing.T) {
 		t.Fatalf("删除后列表应为空: %d %s", status, body)
 	}
 
-	// 持久化到独立的 tags.json,不触碰 accounts.json
-	if _, err := os.Stat(filepath.Join(dir, "tags.json")); err != nil {
-		t.Fatalf("tags.json 未生成: %v", err)
+	// 持久化到独立的 tags.db,不触碰 accounts.json
+	info, err := os.Stat(filepath.Join(dir, "tags.db"))
+	if err != nil {
+		t.Fatalf("tags.db 未生成: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Fatalf("tags.db 权限应为 0600,得到 %o", perm)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "accounts.json")); !os.IsNotExist(err) {
 		t.Fatalf("标签功能不应创建 accounts.json (err=%v)", err)
@@ -340,5 +344,72 @@ func TestTagsBackupExportRestore(t *testing.T) {
 	status, _, _ = do(t, tagAuthed(t, ts, sess, csrf, "POST", "/api/tags/restore", `{}`))
 	if status != http.StatusBadRequest {
 		t.Fatalf("空备份应 400,得到 %d", status)
+	}
+}
+
+// TestTagsPaginationAndStats 验证分页、搜索、标签筛选与统计卡片数据。
+func TestTagsPaginationAndStats(t *testing.T) {
+	dir := t.TempDir()
+	s := mustServer(t, &fakeBackend{}, Config{
+		AdminPassword: "admin-pass-2026-strong",
+		DataDir:       dir,
+	})
+	ts := httptest.NewServer(s.Handler())
+	defer ts.Close()
+	sess, csrf := login(t, ts, "admin-pass-2026-strong")
+
+	authed := func(method, path, body string) *http.Request {
+		req := authedReq(t, ts, method, path, body)
+		req.AddCookie(&http.Cookie{Name: "hme_session", Value: sess})
+		if method != "GET" {
+			req.Header.Set("X-CSRF-Token", csrf)
+		}
+		return req
+	}
+
+	for _, body := range []string{
+		`{"email":"a@example.com","site":"GitHub","tags":["项目A","开发"]}`,
+		`{"email":"b@example.com","site":"Steam","tags":["游戏"]}`,
+		`{"email":"c@example.com"}`,
+	} {
+		if status, resp, _ := do(t, authed("POST", "/api/tags", body)); status != http.StatusOK {
+			t.Fatalf("创建失败: %d %s", status, resp)
+		}
+	}
+
+	// 分页:每页 1 条,共 3 页
+	status, body, _ := do(t, authed("GET", "/api/tags?page=1&page_size=1", ""))
+	if status != http.StatusOK {
+		t.Fatalf("列表失败: %d %s", status, body)
+	}
+	for _, want := range []string{`"count":3`, `"page":1`, `"page_size":1`, `"total_pages":3`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("分页响应缺少 %s: %s", want, body)
+		}
+	}
+
+	// 统计卡片:3 条记录、3 个标签、2 个网站、1 条未打标签
+	for _, want := range []string{`"total":3`, `"tags":3`, `"sites":2`, `"untagged":1`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("统计响应缺少 %s: %s", want, body)
+		}
+	}
+
+	// 搜索匹配网站
+	status, body, _ = do(t, authed("GET", "/api/tags?search=github", ""))
+	if status != http.StatusOK || !strings.Contains(body, `"count":1`) || !strings.Contains(body, "a@example.com") {
+		t.Fatalf("搜索失败: %d %s", status, body)
+	}
+
+	// 标签筛选(OR,忽略大小写)
+	status, body, _ = do(t, authed("GET", "/api/tags?tags="+url.QueryEscape("游戏"), ""))
+	if status != http.StatusOK || !strings.Contains(body, `"count":1`) || !strings.Contains(body, "b@example.com") {
+		t.Fatalf("标签筛选失败: %d %s", status, body)
+	}
+
+	// 页码越界回退到最后一页
+	status, body, _ = do(t, authed("GET", "/api/tags?page=99&page_size=2", ""))
+	if status != http.StatusOK || !strings.Contains(body, `"page":2`) {
+		t.Fatalf("越界页码应回退: %d %s", status, body)
 	}
 }

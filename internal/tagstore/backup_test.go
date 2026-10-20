@@ -17,7 +17,10 @@ func TestExportRestoreRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	backup := src.Export()
+	backup, err := src.Export()
+	if err != nil {
+		t.Fatalf("Export: %v", err)
+	}
 	if backup.Version != backupVersion || backup.Type != backupType || backup.Count != 2 {
 		t.Fatalf("备份元信息不符: %+v", backup)
 	}

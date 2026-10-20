@@ -1,11 +1,10 @@
 package tagstore
 
 import (
+	"database/sql"
 	"fmt"
 	"strings"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 // ImportInput 是批量导入的输入。
@@ -46,7 +45,7 @@ type importLine struct {
 // Import 批量导入记录,并把 in.Tags 应用到每一条记录。
 //
 // 解析与校验失败的行走 Invalid 计数;邮箱+网站已存在时按 Mode 跳过或更新。
-// 整个过程只落盘一次,保存失败会回滚内存状态。
+// 所有写入在同一个事务内完成,任一步失败都会整体回滚。
 func (s *Store) Import(in ImportInput) (ImportResult, error) {
 	tags, err := normalizeTags(in.Tags)
 	if err != nil {
@@ -71,11 +70,29 @@ func (s *Store) Import(in ImportInput) (ImportResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	backup := cloneEntryMap(s.entries)
-	index := make(map[string]string, len(s.entries)) // email|site → id
-	for id, entry := range s.entries {
-		index[entryKey(entry.Email, entry.Site)] = id
+	tx, err := s.db.Begin()
+	if err != nil {
+		return ImportResult{}, err
 	}
+	defer func() { _ = tx.Rollback() }()
+
+	find, err := tx.Prepare(`SELECT id, created_at FROM entries
+		WHERE lower(email) = ? AND lower(site) = ? LIMIT 1`)
+	if err != nil {
+		return ImportResult{}, err
+	}
+	defer func() { _ = find.Close() }()
+	insert, err := tx.Prepare(`INSERT INTO entries(id, email, password, site, note, created_at, updated_at)
+		VALUES(?, ?, ?, ?, '', ?, ?)`)
+	if err != nil {
+		return ImportResult{}, err
+	}
+	defer func() { _ = insert.Close() }()
+	update, err := tx.Prepare(`UPDATE entries SET password = ?, site = ?, updated_at = ? WHERE id = ?`)
+	if err != nil {
+		return ImportResult{}, err
+	}
+	defer func() { _ = update.Close() }()
 
 	now := time.Now().Format(time.RFC3339)
 	for _, line := range lines {
@@ -87,7 +104,6 @@ func (s *Store) Import(in ImportInput) (ImportResult, error) {
 			Email:    line.email,
 			Password: line.password,
 			Site:     site,
-			Tags:     tags,
 		})
 		if err != nil {
 			result.Invalid++
@@ -95,24 +111,42 @@ func (s *Store) Import(in ImportInput) (ImportResult, error) {
 			continue
 		}
 
-		key := entryKey(email, site)
-		if id, ok := index[key]; ok {
-			existing := s.entries[id]
+		var existingID, createdAt string
+		err = find.QueryRow(strings.ToLower(email), strings.ToLower(site)).Scan(&existingID, &createdAt)
+		switch {
+		case err == nil:
 			if mode != "update" {
 				result.Skipped++
 				continue
 			}
-			existing.Password = password
-			existing.Site = site
-			existing.Tags = mergeTags(existing.Tags, tags)
-			existing.UpdatedAt = now
+			existingTags, err := loadTags(tx, existingID)
+			if err != nil {
+				return ImportResult{}, err
+			}
+			merged := mergeTags(existingTags, tags)
+			if _, err := update.Exec(password, site, now, existingID); err != nil {
+				return ImportResult{}, err
+			}
+			if err := replaceTagsTx(tx, existingID, merged); err != nil {
+				return ImportResult{}, err
+			}
 			result.Updated++
-			result.Entries = append(result.Entries, cloneEntry(existing))
+			result.Entries = append(result.Entries, Entry{
+				ID:        existingID,
+				Email:     email,
+				Password:  password,
+				Site:      site,
+				Tags:      merged,
+				CreatedAt: createdAt,
+				UpdatedAt: now,
+			})
 			continue
+		case err != sql.ErrNoRows:
+			return ImportResult{}, err
 		}
 
 		entry := &Entry{
-			ID:        "tag_" + uuid.New().String()[:8],
+			ID:        newEntryID(),
 			Email:     email,
 			Password:  password,
 			Site:      site,
@@ -120,16 +154,20 @@ func (s *Store) Import(in ImportInput) (ImportResult, error) {
 			CreatedAt: now,
 			UpdatedAt: now,
 		}
-		s.entries[entry.ID] = entry
-		index[key] = entry.ID
+		if _, err := insert.Exec(entry.ID, entry.Email, entry.Password, entry.Site, entry.CreatedAt, entry.UpdatedAt); err != nil {
+			return ImportResult{}, err
+		}
+		if err := insertTags(tx, entry.ID, entry.Tags); err != nil {
+			return ImportResult{}, err
+		}
 		result.Imported++
 		result.Entries = append(result.Entries, cloneEntry(entry))
 	}
 
-	if err := s.saveLocked(); err != nil {
-		s.entries = backup
+	if err := tx.Commit(); err != nil {
 		return ImportResult{}, err
 	}
+	s.hardenFiles()
 	return result, nil
 }
 
@@ -204,21 +242,6 @@ func mergeTags(existing, add []string) []string {
 		out = append(out, tag)
 	}
 	return out
-}
-
-// entryKey 生成「邮箱+网站」的去重键(忽略大小写)。
-func entryKey(email, site string) string {
-	return strings.ToLower(strings.TrimSpace(email)) + "|" + strings.ToLower(strings.TrimSpace(site))
-}
-
-// cloneEntryMap 深拷贝记录表,用于保存失败时回滚。
-func cloneEntryMap(src map[string]*Entry) map[string]*Entry {
-	dst := make(map[string]*Entry, len(src))
-	for id, entry := range src {
-		cp := cloneEntry(entry)
-		dst[id] = &cp
-	}
-	return dst
 }
 
 func appendCappedError(errors *[]string, msg string) {

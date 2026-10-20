@@ -118,16 +118,48 @@ export const handlers = [
   ),
   http.post('/api/auth/logout', () => HttpResponse.json({ success: true, data: { logged_out: true } })),
   http.get('/api/accounts', () => HttpResponse.json({ success: true, data: [ACCOUNT] })),
-  http.get('/api/tags', () =>
-    HttpResponse.json({
+  http.get('/api/tags', ({ request }) => {
+    const url = new URL(request.url)
+    const page = Math.max(1, Number(url.searchParams.get('page') ?? '1') || 1)
+    const pageSize = Math.max(1, Number(url.searchParams.get('page_size') ?? '20') || 20)
+    const search = (url.searchParams.get('search') ?? '').trim().toLowerCase()
+    const tagParam = (url.searchParams.get('tags') ?? '').trim().toLowerCase()
+    const filters = tagParam
+      ? tagParam.split(',').map((tag) => tag.trim()).filter(Boolean)
+      : []
+
+    const filtered = TAG_ENTRIES.filter((entry) => {
+      const entryTags = (entry.tags ?? []).map((tag) => tag.toLowerCase())
+      if (filters.length > 0 && !entryTags.some((tag) => filters.includes(tag))) return false
+      if (!search) return true
+      return (
+        entry.email.toLowerCase().includes(search) ||
+        (entry.site ?? '').toLowerCase().includes(search) ||
+        (entry.note ?? '').toLowerCase().includes(search) ||
+        entryTags.some((tag) => tag.includes(search))
+      )
+    })
+
+    const start = (page - 1) * pageSize
+    const entries = filtered.slice(start, start + pageSize)
+    return HttpResponse.json({
       success: true,
       data: {
-        count: TAG_ENTRIES.length,
-        tags: ['项目A', '开发', '游戏'],
-        entries: TAG_ENTRIES,
+        count: filtered.length,
+        page,
+        page_size: pageSize,
+        total_pages: Math.ceil(filtered.length / pageSize),
+        tags: ['开发', '游戏', '项目A'],
+        tag_counts: [
+          { tag: '开发', count: 1 },
+          { tag: '游戏', count: 1 },
+          { tag: '项目A', count: 1 },
+        ],
+        stats: { total: TAG_ENTRIES.length, tags: 3, sites: 2, untagged: 0 },
+        entries,
       },
-    }),
-  ),
+    })
+  }),
   http.post('/api/tags', () =>
     HttpResponse.json({
       success: true,

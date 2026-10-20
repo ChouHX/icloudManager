@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Alert,
   App as AntdApp,
@@ -13,6 +13,7 @@ import {
   Space,
   Table,
   Tag,
+  Tooltip,
   Typography,
 } from 'antd'
 import type { TableProps } from 'antd'
@@ -20,6 +21,7 @@ import {
   DeleteOutlined,
   DownloadOutlined,
   EditOutlined,
+  InfoCircleOutlined,
   PlusOutlined,
   ReloadOutlined,
   TagsOutlined,
@@ -180,8 +182,42 @@ function TagFormModal({
   )
 }
 
+/** 顶部紧凑统计卡片 */
+function StatItem({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="stat-item">
+      <span className="stat-value">{value}</span>
+      <span className="stat-label">{label}</span>
+    </div>
+  )
+}
+
 export default function TagsPage() {
-  const { data, loading, error, reload } = useTags()
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(20)
+  const [searchInput, setSearchInput] = useState('')
+  const [search, setSearch] = useState('')
+  const [selectedTags, setSelectedTags] = useState<string[]>([])
+
+  // 输入防抖,避免每敲一个字符都请求服务端
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSearch(searchInput.trim())
+      setPage(1)
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [searchInput])
+
+  const query = useMemo(() => {
+    const params = new URLSearchParams()
+    params.set('page', String(page))
+    params.set('page_size', String(pageSize))
+    if (search) params.set('search', search)
+    if (selectedTags.length > 0) params.set('tags', selectedTags.join(','))
+    return `?${params.toString()}`
+  }, [page, pageSize, search, selectedTags])
+
+  const { data, loading, error, reload } = useTags(query)
   const { message } = AntdApp.useApp()
 
   const [formOpen, setFormOpen] = useState(false)
@@ -189,14 +225,24 @@ export default function TagsPage() {
   const [manageOpen, setManageOpen] = useState(false)
   const [backupOpen, setBackupOpen] = useState(false)
   const [editing, setEditing] = useState<TagEntry | null>(null)
-  const [search, setSearch] = useState('')
-  const [selectedTags, setSelectedTags] = useState<string[]>([])
 
   const entries = useMemo(() => data?.entries ?? [], [data])
   const tagOptions = useMemo(() => data?.tags ?? [], [data])
+  const stats = data?.stats ?? { total: 0, tags: 0, sites: 0, untagged: 0 }
+  const hasFilters = search !== '' || selectedTags.length > 0
+  // 服务端可能因删除/筛选回退页码,展示时以服务端返回的页码为准
+  const currentPage = data?.page ?? page
 
+  // 标签使用数优先取服务端聚合结果(覆盖所有分页),缺失时才用当前页兜底
   const tagCounts = useMemo(() => {
     const map: Record<string, number> = {}
+    const counts = data?.tag_counts
+    if (counts && counts.length > 0) {
+      for (const usage of counts) {
+        map[usage.tag.toLowerCase()] = usage.count
+      }
+      return map
+    }
     for (const entry of entries) {
       for (const tag of entry.tags ?? []) {
         const key = tag.toLowerCase()
@@ -204,24 +250,7 @@ export default function TagsPage() {
       }
     }
     return map
-  }, [entries])
-
-  const rows = useMemo(() => {
-    const keyword = search.trim().toLowerCase()
-    return entries.filter((entry) => {
-      if (selectedTags.length > 0) {
-        const own = new Set((entry.tags ?? []).map((tag) => tag.toLowerCase()))
-        if (!selectedTags.some((tag) => own.has(tag.toLowerCase()))) return false
-      }
-      if (!keyword) return true
-      return (
-        entry.email.toLowerCase().includes(keyword) ||
-        (entry.site ?? '').toLowerCase().includes(keyword) ||
-        (entry.note ?? '').toLowerCase().includes(keyword) ||
-        (entry.tags ?? []).some((tag) => tag.toLowerCase().includes(keyword))
-      )
-    })
-  }, [entries, search, selectedTags])
+  }, [data, entries])
 
   async function remove(entry: TagEntry) {
     try {
@@ -231,6 +260,15 @@ export default function TagsPage() {
     } catch (err) {
       message.error(err instanceof ApiError ? err.message : '删除失败，请重试')
     }
+  }
+
+  function handlePageChange(nextPage: number, nextSize: number) {
+    if (nextSize !== pageSize) {
+      setPageSize(nextSize)
+      setPage(1)
+      return
+    }
+    setPage(nextPage)
   }
 
   const columns: TableProps<TagEntry>['columns'] = [
@@ -321,9 +359,21 @@ export default function TagsPage() {
   return (
     <div className="page">
       <div className="page-head">
-        <div>
-          <h2>标签账号</h2>
-          <p>记录邮箱、网站密码与项目标签，按项目区分账号使用情况（与 iCloud 账号无关）</p>
+        <div className="stat-strip">
+          <Tooltip title="记录邮箱、网站密码与项目标签，用于区分每个项目使用的账号（与 iCloud 账号无关）">
+            <Button
+              type="text"
+              size="small"
+              shape="circle"
+              className="stat-info"
+              icon={<InfoCircleOutlined />}
+              aria-label="标签账号说明"
+            />
+          </Tooltip>
+          <StatItem label="记录" value={stats.total} />
+          <StatItem label="标签" value={stats.tags} />
+          <StatItem label="网站" value={stats.sites} />
+          <StatItem label="未打标签" value={stats.untagged} />
         </div>
         <Space wrap>
           <Button icon={<UploadOutlined />} onClick={() => setImportOpen(true)}>
@@ -348,32 +398,31 @@ export default function TagsPage() {
         </Space>
       </div>
 
-      <Card
-        variant="borderless"
-        title={`记录列表${data ? ` · ${data.count}` : ''}`}
-        extra={
-          <Space wrap>
-            <Input.Search
-              allowClear
-              placeholder="搜索邮箱、网站、备注或标签"
-              style={{ width: 240 }}
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-            <Select
-              mode="multiple"
-              allowClear
-              placeholder="按项目标签筛选"
-              style={{ minWidth: 200 }}
-              value={selectedTags}
-              onChange={setSelectedTags}
-              options={tagOptions.map((tag) => ({ value: tag, label: tag }))}
-              maxTagCount="responsive"
-            />
-            <Button icon={<ReloadOutlined />} onClick={reload} aria-label="刷新列表" />
-          </Space>
-        }
-      >
+      <Card variant="borderless">
+        <div className="list-toolbar">
+          <Input.Search
+            allowClear
+            placeholder="搜索邮箱、网站、备注或标签"
+            style={{ width: 260 }}
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+          />
+          <Select
+            mode="multiple"
+            allowClear
+            placeholder="按项目标签筛选"
+            style={{ minWidth: 220 }}
+            value={selectedTags}
+            onChange={(values) => {
+              setSelectedTags(values)
+              setPage(1)
+            }}
+            options={tagOptions.map((tag) => ({ value: tag, label: tag }))}
+            maxTagCount="responsive"
+          />
+          <Button icon={<ReloadOutlined />} onClick={reload} aria-label="刷新列表" />
+        </div>
+
         {error && (
           <Alert
             type="error"
@@ -387,7 +436,7 @@ export default function TagsPage() {
             }
           />
         )}
-        {!loading && entries.length === 0 && !error ? (
+        {!loading && !error && (data?.count ?? 0) === 0 && !hasFilters ? (
           <Result
             status="info"
             icon={<TagsOutlined />}
@@ -409,9 +458,17 @@ export default function TagsPage() {
           <Table<TagEntry>
             rowKey="id"
             columns={columns}
-            dataSource={rows}
+            dataSource={entries}
             loading={loading}
-            pagination={{ pageSize: 20, hideOnSinglePage: true, showSizeChanger: false }}
+            pagination={{
+              current: currentPage,
+              pageSize,
+              total: data?.count ?? 0,
+              showSizeChanger: true,
+              pageSizeOptions: [10, 20, 50, 100],
+              showTotal: (total) => `共 ${total} 条`,
+              onChange: handlePageChange,
+            }}
             scroll={{ x: 1180 }}
           />
         )}

@@ -8,20 +8,81 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"icloud-hme/internal/tagstore"
 )
 
-// listTagsHandler 处理 GET /api/tags,返回全部记录与已用标签。
+// listTagsHandler 处理 GET /api/tags,返回分页记录、标签统计与汇总卡片数据。
+//
+// 查询参数:
+//
+//	page       页码,默认 1
+//	page_size  每页条数,默认 20,最大 200
+//	search     关键字(邮箱/网站/备注/标签)
+//	tags       标签筛选,逗号分隔,任一命中即可(OR)
 func (s *Server) listTagsHandler(c *gin.Context) {
-	entries := s.tags.List()
-	ok(c, gin.H{
-		"count":   len(entries),
-		"tags":    s.tags.Tags(),
-		"entries": entries,
+	page := parsePositiveInt(c.Query("page"), 1)
+	pageSize := parsePositiveInt(c.Query("page_size"), 20)
+
+	res, err := s.tags.ListPage(tagstore.ListQuery{
+		Page:     page,
+		PageSize: pageSize,
+		Search:   c.Query("search"),
+		Tags:     parseTagFilters(c.QueryArray("tags")),
 	})
+	if err != nil {
+		failCode(c, http.StatusInternalServerError, "INTERNAL_ERROR", "读取标签记录失败")
+		return
+	}
+	counts, err := s.tags.TagCounts()
+	if err != nil {
+		failCode(c, http.StatusInternalServerError, "INTERNAL_ERROR", "读取标签统计失败")
+		return
+	}
+	stats, err := s.tags.Stats()
+	if err != nil {
+		failCode(c, http.StatusInternalServerError, "INTERNAL_ERROR", "读取标签统计失败")
+		return
+	}
+	tags := make([]string, len(counts))
+	for i, usage := range counts {
+		tags[i] = usage.Tag
+	}
+
+	ok(c, gin.H{
+		"count":       res.Total,
+		"page":        res.Page,
+		"page_size":   res.PageSize,
+		"total_pages": (res.Total + res.PageSize - 1) / res.PageSize,
+		"tags":        tags,
+		"tag_counts":  counts,
+		"stats":       stats,
+		"entries":     res.Entries,
+	})
+}
+
+func parsePositiveInt(raw string, fallback int) int {
+	value, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || value <= 0 {
+		return fallback
+	}
+	return value
+}
+
+// parseTagFilters 兼容 tags=a,b 与 tags=a&tags=b 两种写法。
+func parseTagFilters(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		for _, item := range strings.Split(value, ",") {
+			if item = strings.TrimSpace(item); item != "" {
+				out = append(out, item)
+			}
+		}
+	}
+	return out
 }
 
 // createTagHandler 处理 POST /api/tags。
@@ -134,7 +195,12 @@ func (s *Server) deleteTagLabelHandler(c *gin.Context) {
 
 // exportTagsHandler 处理 GET /api/tags/export,返回可迁移的备份文档。
 func (s *Server) exportTagsHandler(c *gin.Context) {
-	ok(c, s.tags.Export())
+	backup, err := s.tags.Export()
+	if err != nil {
+		failCode(c, http.StatusInternalServerError, "INTERNAL_ERROR", "导出备份失败")
+		return
+	}
+	ok(c, backup)
 }
 
 // restoreTagsHandler 处理 POST /api/tags/restore,从备份文档导入记录。

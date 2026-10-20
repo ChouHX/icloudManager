@@ -687,20 +687,38 @@ X-CSRF-Token: <token>
 
 用于记录「邮箱 / 网站密码 / 项目标签」，按项目区分账号的使用情况。
 该功能**与 iCloud 账号体系完全解耦**：不读取、不修改 `accounts.json`，
-也不参与任何 Hide My Email 流程，数据单独持久化到 `data/tags.json`（0600）。
+也不参与任何 Hide My Email 流程，数据单独持久化到 `data/tags.db`（SQLite，0600）。
+旧版本的 `data/tags.json` 会在首次启动时自动迁移进 SQLite，并重命名为
+`data/tags.json.bak`；迁移只在数据库为空时执行，避免重复导入。
 
-**列出记录**
+**列出记录（分页）**
 
 ```http
-GET /api/tags
+GET /api/tags?page=1&page_size=20&search=github&tags=项目A,游戏
 ```
+
+| 查询参数 | 说明 |
+| --- | --- |
+| `page` | 页码，从 1 开始，默认 1 |
+| `page_size` | 每页条数，默认 20，最大 200 |
+| `search` | 关键字，匹配邮箱、网站、备注或标签（忽略大小写） |
+| `tags` | 标签筛选，逗号分隔，命中任一即可（OR） |
 
 ```json
 {
   "success": true,
   "data": {
     "count": 1,
-    "tags": ["项目A", "游戏"],
+    "page": 1,
+    "page_size": 20,
+    "total_pages": 1,
+    "tags": ["项目A", "开发", "游戏"],
+    "tag_counts": [
+      { "tag": "项目A", "count": 1 },
+      { "tag": "开发", "count": 1 },
+      { "tag": "游戏", "count": 1 }
+    ],
+    "stats": { "total": 1, "tags": 3, "sites": 1, "untagged": 0 },
     "entries": [
       {
         "id": "tag_1a2b3c4d",
@@ -717,7 +735,10 @@ GET /api/tags
 }
 ```
 
-`tags` 是所有记录中出现过的去重标签，可直接用于筛选下拉框。
+- `count` 是符合筛选条件的记录总数；`entries` 仅为当前页。
+- `tags` 是全部记录中出现过的去重标签，可直接用于筛选下拉框。
+- `tag_counts` 是每个标签的使用记录数（覆盖全部分页），供标签管理弹窗使用。
+- `stats` 是页面顶部统计卡片数据：记录总数、标签数、网站数、未打标签的记录数。
 
 **新增记录**
 
@@ -797,8 +818,8 @@ X-CSRF-Token: <token>
 ```
 
 解析或校验失败的行计入 `invalid`，行级错误最多返回 20 条。为避免万级导入时响应过大，
-响应不逐条回传记录，只返回统计与错误。整个导入只落盘一次，
-保存失败会回滚内存状态并返回 `400 VALIDATION_ERROR`。
+响应不逐条回传记录，只返回统计与错误。所有写入在同一个 SQLite 事务内完成，
+任一步失败都会整体回滚并返回 `400 VALIDATION_ERROR`。
 
 **重命名标签（全局）**
 
@@ -883,7 +904,7 @@ X-CSRF-Token: <token>
 ```
 
 备份类型/版本不匹配或没有可导入记录时返回 `400 VALIDATION_ERROR`。
-整个导入只落盘一次，保存失败会回滚内存状态。
+所有写入在同一个 SQLite 事务内完成，任一步失败都会整体回滚。
 
 ---
 

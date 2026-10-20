@@ -1,7 +1,7 @@
 package tagstore
 
 import (
-	"os"
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -176,31 +176,24 @@ func TestRenameAndDeleteTag(t *testing.T) {
 	}
 }
 
-func TestImportRollbackOnSaveFailure(t *testing.T) {
-	dir := t.TempDir()
-	s, err := NewStore(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
+func TestImportRollbackOnWriteFailure(t *testing.T) {
+	s := newTestStore(t)
 	if _, err := s.Create(Input{Email: "a@example.com"}); err != nil {
 		t.Fatal(err)
 	}
 	before := len(s.List())
 
-	// 破坏数据文件所在目录的写入能力:改为只读
-	if os.Geteuid() == 0 {
-		t.Skip("root 不受目录权限限制")
+	// 只读模式让导入事务内的写入失败,验证整体回滚且不留下半成品。
+	if _, err := s.db.Exec(`PRAGMA query_only = ON`); err != nil {
+		t.Fatalf("设置只读模式: %v", err)
 	}
-	if err := os.Chmod(dir, 0o500); err != nil {
-		t.Skipf("无法设置只读目录: %v", err)
-	}
-	defer func() { _ = os.Chmod(dir, 0o700) }()
+	t.Cleanup(func() { _, _ = s.db.Exec(`PRAGMA query_only = OFF`) })
 
 	if _, err := s.Import(ImportInput{Text: "b@example.com----p"}); err == nil {
-		t.Fatal("保存失败时 Import 应返回错误")
+		t.Fatal("写入失败时 Import 应返回错误")
 	}
 	if after := len(s.List()); after != before {
-		t.Fatalf("保存失败后应回滚,记录数 %d → %d", before, after)
+		t.Fatalf("写入失败后应回滚,记录数 %d → %d", before, after)
 	}
 }
 
@@ -226,11 +219,11 @@ func TestImportWithoutTagsKeepsTagsNonNull(t *testing.T) {
 		}
 	}
 
-	raw, err := os.ReadFile(s.path)
+	raw, err := json.Marshal(s.List())
 	if err != nil {
-		t.Fatalf("读取存储文件: %v", err)
+		t.Fatalf("序列化记录: %v", err)
 	}
-	if strings.Contains(string(raw), `"tags": null`) {
-		t.Fatalf("持久化文件不应出现 tags:null:\n%s", raw)
+	if strings.Contains(string(raw), `"tags":null`) {
+		t.Fatalf("序列化结果不应出现 tags:null:\n%s", raw)
 	}
 }

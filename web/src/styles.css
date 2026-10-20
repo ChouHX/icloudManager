@@ -144,6 +144,51 @@ code,
   font-size: 13px;
 }
 
+/* 标签账号:顶部紧凑统计卡片 */
+.stat-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.stat-item {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 72px;
+  padding: 6px 12px;
+  border: 1px solid #e6e8eb;
+  border-radius: 10px;
+  background: #ffffff;
+  line-height: 1.2;
+}
+
+.stat-value {
+  font-size: 16px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-label {
+  margin-top: 2px;
+  color: #64748b;
+  font-size: 11px;
+}
+
+.stat-info {
+  color: #64748b;
+}
+
+/* 列表工具栏 */
+.list-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
 .toolbar {
   display: flex;
   gap: 12px;

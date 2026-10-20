@@ -138,11 +138,37 @@ export interface TagEntry {
   updated_at: string
 }
 
-/** 标签凭据列表结果 */
-export interface TagListResult {
+/** 标签账号的汇总统计 */
+export interface TagStats {
+  total: number
+  tags: number
+  sites: number
+  untagged: number
+}
+
+/** 单个标签的使用记录数 */
+export interface TagUsageCount {
+  tag: string
   count: number
+}
+
+/** 标签凭据列表结果(服务端分页) */
+export interface TagListResult {
+  /** 符合筛选条件的记录总数 */
+  count: number
+  /** 当前页码,从 1 开始 */
+  page?: number
+  /** 每页条数 */
+  page_size?: number
+  /** 总页数 */
+  total_pages?: number
   /** 所有记录中出现过的去重标签 */
   tags: string[]
+  /** 每个标签的使用记录数(覆盖全部分页) */
+  tag_counts?: TagUsageCount[]
+  /** 汇总统计卡片数据 */
+  stats?: TagStats
+  /** 当前页记录 */
   entries: TagEntry[]
 }
 

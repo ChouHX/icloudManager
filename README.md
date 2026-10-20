@@ -14,7 +14,7 @@
 - ✅ **取件链接** — 为任意别名生成只读链接（`host:port/?token=xxx`），凭链接即可查看该别名的邮件，无需登录
 - ✅ **自动建满** — 后台按间隔自动创建别名直到达到目标总数，命中限流自动冷却续跑，界面可看进度与日志
 - ✅ **多账号管理** — 多账号并行，Cookie / App 密码 / 收件邮箱集中配置
-- ✅ **标签账号** — 独立于 iCloud 的「邮箱 / 网站密码 / 项目标签」记录，支持批量导入（统一打标签）、标签重命名/删除、备份导出与导入迁移，按项目区分账号使用情况，数据单独存放
+- ✅ **标签账号** — 独立于 iCloud 的「邮箱 / 网站密码 / 项目标签」记录，支持服务端分页、顶部紧凑统计卡片、批量导入（统一打标签）、标签重命名/删除、备份导出与导入迁移，数据单独存放在 SQLite `data/tags.db`
 - ✅ **安全模型** — 单管理员会话、CSRF 校验、登录限流、响应脱敏、严格 CSP
 
 ## 快速开始
@@ -200,7 +200,7 @@ icloud-hme/
 │       ├── pages/             #   创建别名、取件、标签账号、账号设置、登录
 │       └── test/              #   vitest + msw 测试基础设施
 ├── accounts.json           # 账号配置文件 (自动生成)
-├── tags.json               # 标签凭据配置 (自动生成,与账号无关)
+├── tags.db                 # 标签凭据配置 (SQLite,自动生成,与账号无关)
 ├── go.mod
 └── internal/
     ├── account/
@@ -237,7 +237,7 @@ icloud-hme/
 - **hme.auth**: SRP 协议登录,支持账号密码 + 可选 2FA
 - **mail.Client**: IMAP 邮件客户端 (App Password,优先读邮件)
 - **mail.WebClient**: 通过 iCloud Web API (mccgateway) 读取邮件,无需 App Password
-- **tagstore.Store**: 独立于 iCloud 的标签凭据存储(邮箱/密码/项目标签),持久化到 `tags.json`
+- **tagstore.Store**: 独立于 iCloud 的标签凭据存储(邮箱/密码/项目标签),持久化到 SQLite `tags.db`(旧 `tags.json` 首次启动自动迁移)
 - **server.Server**: HTTP API 服务 + 管理界面静态资源
 
 ## 技术栈

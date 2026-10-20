@@ -91,12 +91,12 @@ export function useAccounts(): {
   return { accounts: data ?? [], loading, error, reload }
 }
 
-/** 标签凭据列表(独立于 iCloud 账号,含手动刷新) */
-export function useTags(): {
+/** 标签凭据列表(独立于 iCloud 账号,含手动刷新;query 为可选查询串) */
+export function useTags(query = ''): {
   data: TagListResult | null
   loading: boolean
   error: string
   reload: () => void
 } {
-  return useFetch<TagListResult>('/api/tags')
+  return useFetch<TagListResult>(`/api/tags${query}`)
 }

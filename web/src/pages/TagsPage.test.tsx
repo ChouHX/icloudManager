@@ -94,8 +94,8 @@ describe('TagsPage', { timeout: 30000 }, () => {
     await screen.findByText('user@example.com')
 
     await user.type(screen.getByPlaceholderText('搜索邮箱、网站、备注或标签'), 'GitHub')
+    await waitFor(() => expect(screen.queryByText('gamer@example.com')).not.toBeInTheDocument())
     expect(await screen.findByText('user@example.com')).toBeInTheDocument()
-    expect(screen.queryByText('gamer@example.com')).not.toBeInTheDocument()
   })
 
   it('删除记录', async () => {
