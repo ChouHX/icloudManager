@@ -136,12 +136,30 @@ func (s *Store) List() []Entry {
 }
 
 // Tags 返回所有记录中出现过的去重标签,按字母序排列。
+//
+// 同名标签出现不同大小写写法时,以创建时间最早(其次邮箱、ID)的记录为准,
+// 保证结果可复现,不随 map 迭代顺序变化。
 func (s *Store) Tags() []string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	seen := make(map[string]string) // lower → 原始写法
+	entries := make([]*Entry, 0, len(s.entries))
 	for _, entry := range s.entries {
+		entries = append(entries, entry)
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		a, b := entries[i], entries[j]
+		if a.CreatedAt != b.CreatedAt {
+			return a.CreatedAt < b.CreatedAt
+		}
+		if a.Email != b.Email {
+			return a.Email < b.Email
+		}
+		return a.ID < b.ID
+	})
+
+	seen := make(map[string]string) // lower → 原始写法
+	for _, entry := range entries {
 		for _, tag := range entry.Tags {
 			key := strings.ToLower(tag)
 			if _, ok := seen[key]; !ok {
