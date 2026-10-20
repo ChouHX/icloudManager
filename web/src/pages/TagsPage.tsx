@@ -18,6 +18,7 @@ import {
 import type { TableProps } from 'antd'
 import {
   DeleteOutlined,
+  DownloadOutlined,
   EditOutlined,
   PlusOutlined,
   ReloadOutlined,
@@ -28,7 +29,7 @@ import { ApiError, request } from '../api/client'
 import { useTags } from '../api/hooks'
 import type { TagEntry, TagEntryInput } from '../api/types'
 import { formatDateTime } from '../utils/format'
-import { TagImportModal, TagManageModal } from '../components/TagModals'
+import { TagBackupModal, TagImportModal, TagManageModal } from '../components/TagModals'
 
 /** 密码单元格:默认打码,可切换显示,支持一键复制 */
 function PasswordCell({ password }: { password?: string }) {
@@ -186,6 +187,7 @@ export default function TagsPage() {
   const [formOpen, setFormOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
   const [manageOpen, setManageOpen] = useState(false)
+  const [backupOpen, setBackupOpen] = useState(false)
   const [editing, setEditing] = useState<TagEntry | null>(null)
   const [search, setSearch] = useState('')
   const [selectedTags, setSelectedTags] = useState<string[]>([])
@@ -328,6 +330,9 @@ export default function TagsPage() {
           <Button icon={<TagsOutlined />} onClick={() => setManageOpen(true)}>
             标签管理
           </Button>
+          <Button icon={<DownloadOutlined />} onClick={() => setBackupOpen(true)}>
+            备份迁移
+          </Button>
           <Button
             type="primary"
             icon={<PlusOutlined />}
@@ -438,6 +443,10 @@ export default function TagsPage() {
           onClose={() => setManageOpen(false)}
           onChanged={() => reload()}
         />
+      )}
+
+      {backupOpen && (
+        <TagBackupModal open onClose={() => setBackupOpen(false)} onRestored={() => reload()} />
       )}
     </div>
   )

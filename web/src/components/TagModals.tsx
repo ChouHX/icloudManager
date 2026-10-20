@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
+import type { ChangeEvent } from 'react'
 import {
   Alert,
   App as AntdApp,
   Button,
+  Divider,
   Form,
   Input,
   Modal,
@@ -15,9 +17,23 @@ import {
   Typography,
 } from 'antd'
 import type { InputRef, TableProps } from 'antd'
-import { DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons'
+import {
+  DeleteOutlined,
+  DownloadOutlined,
+  EditOutlined,
+  InboxOutlined,
+  PlusOutlined,
+  UploadOutlined,
+} from '@ant-design/icons'
 import { ApiError, request } from '../api/client'
-import type { TagImportInput, TagImportResult } from '../api/types'
+import type {
+  TagBackup,
+  TagEntry,
+  TagImportInput,
+  TagImportResult,
+  TagRestoreInput,
+  TagRestoreResult,
+} from '../api/types'
 
 const IMPORT_FORMAT_HELP =
   '每行一条记录，支持「邮箱----密码----网站」，也支持制表符、竖线、逗号、英文冒号或空格分隔；' +
@@ -344,6 +360,225 @@ export function TagManageModal({
       <Typography.Paragraph type="secondary" style={{ marginTop: 12, marginBottom: 0, fontSize: 12 }}>
         <PlusOutlined /> 在「添加记录」或「批量导入」的标签输入框中回车即可创建新标签。
       </Typography.Paragraph>
+    </Modal>
+  )
+}
+
+/** 从备份文档中提取记录,兼容备份对象、API 响应包裹与纯数组三种形态 */
+function extractBackupEntries(parsed: unknown): TagEntry[] | null {
+  if (Array.isArray(parsed)) {
+    return parsed as TagEntry[]
+  }
+  if (parsed && typeof parsed === 'object') {
+    const obj = parsed as Record<string, unknown>
+    if (Array.isArray(obj.entries)) {
+      return obj.entries as TagEntry[]
+    }
+    const data = obj.data
+    if (data && typeof data === 'object' && Array.isArray((data as Record<string, unknown>).entries)) {
+      return (data as Record<string, unknown>).entries as TagEntry[]
+    }
+  }
+  return null
+}
+
+function downloadJSON(payload: unknown, filename: string): void {
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}
+
+function backupFileName(exportedAt: string): string {
+  const stamp = (exportedAt || new Date().toISOString())
+    .replace(/[:.]/g, '-')
+    .replace(/\+.*$/, '')
+  return `tags-backup-${stamp}.json`
+}
+
+/** 备份导出 / 导入,用于跨实例迁移数据 */
+export function TagBackupModal({
+  open,
+  onClose,
+  onRestored,
+}: {
+  open: boolean
+  onClose: () => void
+  onRestored: () => void
+}) {
+  const [exporting, setExporting] = useState(false)
+  const [importing, setImporting] = useState(false)
+  const [mode, setMode] = useState<'merge' | 'replace'>('merge')
+  const [text, setText] = useState('')
+  const [fileName, setFileName] = useState('')
+  const [error, setError] = useState('')
+  const [result, setResult] = useState<TagRestoreResult | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  async function handleExport() {
+    setExporting(true)
+    setError('')
+    try {
+      const backup = await request<TagBackup>('/api/tags/export')
+      downloadJSON(backup, backupFileName(backup.exported_at))
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : '导出失败，请重试')
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  async function handleImport() {
+    setError('')
+    setResult(null)
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(text)
+    } catch {
+      setError('内容不是有效的 JSON，请选择导出的备份文件或粘贴其内容')
+      return
+    }
+    const entries = extractBackupEntries(parsed)
+    if (!entries || entries.length === 0) {
+      setError('未在备份中找到任何记录')
+      return
+    }
+    const body: TagRestoreInput = { entries, mode }
+    setImporting(true)
+    try {
+      const res = await request<TagRestoreResult>('/api/tags/restore', { method: 'POST', body })
+      setResult(res)
+      onRestored()
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : '导入失败，请重试')
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  function handlePickFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    if (!file) return
+    setFileName(file.name)
+    const reader = new FileReader()
+    reader.onload = () => {
+      setText(typeof reader.result === 'string' ? reader.result : '')
+      setError('')
+      setResult(null)
+    }
+    reader.readAsText(file)
+    event.target.value = ''
+  }
+
+  return (
+    <Modal
+      open={open}
+      title="备份与迁移"
+      width={640}
+      onCancel={onClose}
+      destroyOnHidden
+      mask={{ closable: false }}
+      footer={
+        <Button type="primary" onClick={onClose}>
+          完成
+        </Button>
+      }
+    >
+      {error && <Alert type="error" showIcon title={error} style={{ marginBottom: 16 }} />}
+
+      <Typography.Title level={5} style={{ marginTop: 0 }}>
+        导出备份
+      </Typography.Title>
+      <Typography.Paragraph type="secondary">
+        导出全部标签账号为 JSON 文件，包含邮箱、密码、网站与项目标签，可用于在其他实例恢复。
+      </Typography.Paragraph>
+      <Button icon={<DownloadOutlined />} loading={exporting} onClick={() => void handleExport()}>
+        导出备份文件
+      </Button>
+
+      <Divider />
+
+      <Typography.Title level={5}>导入备份</Typography.Title>
+      <Typography.Paragraph type="secondary">
+        选择或粘贴之前导出的 JSON 文件，将记录恢复到当前实例。
+      </Typography.Paragraph>
+
+      {result ? (
+        <Alert
+          type={result.invalid > 0 ? 'warning' : 'success'}
+          showIcon
+          message="导入完成"
+          description={
+            <Space direction="vertical" size={4}>
+              <Space size={16} wrap>
+                <span>新增 <strong>{result.imported}</strong></span>
+                <span>跳过 <strong>{result.skipped}</strong></span>
+                <span>无效 <strong>{result.invalid}</strong></span>
+                <span>当前共 <strong>{result.total}</strong> 条</span>
+              </Space>
+              {result.errors.length > 0 && (
+                <ul style={{ margin: 0, paddingLeft: 18 }}>
+                  {result.errors.map((item) => (
+                    <li key={item}>
+                      <Typography.Text type="secondary">{item}</Typography.Text>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Space>
+          }
+        />
+      ) : (
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Space wrap>
+            <Button icon={<InboxOutlined />} onClick={() => fileInputRef.current?.click()}>
+              选择备份文件
+            </Button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="application/json,.json"
+              style={{ display: 'none' }}
+              onChange={handlePickFile}
+              aria-label="选择备份文件"
+            />
+            {fileName && <Typography.Text type="secondary">{fileName}</Typography.Text>}
+          </Space>
+          <Input.TextArea
+            rows={6}
+            spellCheck={false}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="也可以直接粘贴备份 JSON 内容"
+            aria-label="备份 JSON 内容"
+          />
+          <Radio.Group
+            value={mode}
+            onChange={(e) => setMode(e.target.value as 'merge' | 'replace')}
+            options={[
+              { value: 'merge', label: '合并：保留现有记录，跳过重复' },
+              { value: 'replace', label: '覆盖：清空后仅保留备份内容' },
+            ]}
+          />
+          {mode === 'replace' && (
+            <Alert type="warning" showIcon message="覆盖导入会先清空当前所有标签账号，请谨慎操作。" />
+          )}
+          <Button
+            type="primary"
+            icon={<UploadOutlined />}
+            loading={importing}
+            disabled={!text.trim()}
+            onClick={() => void handleImport()}
+          >
+            导入备份
+          </Button>
+        </Space>
+      )}
     </Modal>
   )
 }

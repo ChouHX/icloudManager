@@ -169,6 +169,24 @@ export const handlers = [
   http.delete('/api/tag-labels/:name', () =>
     HttpResponse.json({ success: true, data: { changed: 1, tag: '开发' } }),
   ),
+  http.get('/api/tags/export', () =>
+    HttpResponse.json({
+      success: true,
+      data: {
+        version: 1,
+        type: 'icloud-hme-tags',
+        exported_at: '2026-08-06T10:00:00+08:00',
+        count: TAG_ENTRIES.length,
+        entries: TAG_ENTRIES,
+      },
+    }),
+  ),
+  http.post('/api/tags/restore', () =>
+    HttpResponse.json({
+      success: true,
+      data: { imported: 2, skipped: 1, invalid: 0, total: 3, errors: [] },
+    }),
+  ),
   http.get('/api/aliases', () =>
     HttpResponse.json({ success: true, data: { account_id: ACCOUNT.id, count: ALIASES.length, aliases: ALIASES } }),
   ),

@@ -89,7 +89,7 @@ func (s *Store) Import(in ImportInput) (ImportResult, error) {
 		})
 		if err != nil {
 			result.Invalid++
-			appendImportError(&result, fmt.Sprintf("第 %d 行: %v", line.line, err))
+			appendCappedError(&result.Errors, fmt.Sprintf("第 %d 行: %v", line.line, err))
 			continue
 		}
 
@@ -219,9 +219,9 @@ func cloneEntryMap(src map[string]*Entry) map[string]*Entry {
 	return dst
 }
 
-func appendImportError(result *ImportResult, msg string) {
-	if len(result.Errors) >= maxImportErrors {
+func appendCappedError(errors *[]string, msg string) {
+	if len(*errors) >= maxImportErrors {
 		return
 	}
-	result.Errors = append(result.Errors, msg)
+	*errors = append(*errors, msg)
 }

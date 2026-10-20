@@ -184,6 +184,33 @@ export interface TagRenameResult {
   to: string
 }
 
+/** 标签凭据备份文档 */
+export interface TagBackup {
+  version: number
+  type: string
+  exported_at: string
+  count: number
+  entries: TagEntry[]
+}
+
+/** 从备份导入的输入 */
+export interface TagRestoreInput {
+  version?: number
+  type?: string
+  entries: TagEntry[]
+  /** merge: 跳过已存在(默认);replace: 清空后重建 */
+  mode: 'merge' | 'replace'
+}
+
+/** 备份导入结果 */
+export interface TagRestoreResult {
+  imported: number
+  skipped: number
+  invalid: number
+  total: number
+  errors: string[]
+}
+
 /** 后台自动建满任务的一条日志 */
 export interface AutoCreateLog {
   time: string

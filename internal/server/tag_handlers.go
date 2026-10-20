@@ -5,6 +5,8 @@
 package server
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -126,4 +128,57 @@ func (s *Server) deleteTagLabelHandler(c *gin.Context) {
 		return
 	}
 	ok(c, gin.H{"changed": changed, "tag": name})
+}
+
+// exportTagsHandler 处理 GET /api/tags/export,返回可迁移的备份文档。
+func (s *Server) exportTagsHandler(c *gin.Context) {
+	ok(c, s.tags.Export())
+}
+
+// restoreTagsHandler 处理 POST /api/tags/restore,从备份文档导入记录。
+func (s *Server) restoreTagsHandler(c *gin.Context) {
+	raw, err := c.GetRawData()
+	if err != nil || len(raw) == 0 {
+		failCode(c, http.StatusBadRequest, "VALIDATION_ERROR", "参数错误")
+		return
+	}
+	in, err := parseRestorePayload(raw)
+	if err != nil {
+		failCode(c, http.StatusBadRequest, "VALIDATION_ERROR", err.Error())
+		return
+	}
+	result, err := s.tags.Restore(in)
+	if err != nil {
+		failCode(c, http.StatusBadRequest, "VALIDATION_ERROR", err.Error())
+		return
+	}
+	ok(c, result)
+}
+
+// parseRestorePayload 兼容三种备份载体:备份对象、API 响应包裹、纯记录数组。
+func parseRestorePayload(raw []byte) (tagstore.RestoreInput, error) {
+	var direct tagstore.RestoreInput
+	if err := json.Unmarshal(raw, &direct); err == nil && len(direct.Entries) > 0 {
+		return direct, nil
+	}
+
+	var wrapped struct {
+		Data json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &wrapped); err == nil && len(wrapped.Data) > 0 {
+		var in tagstore.RestoreInput
+		if err := json.Unmarshal(wrapped.Data, &in); err == nil && len(in.Entries) > 0 {
+			if in.Mode == "" {
+				in.Mode = direct.Mode
+			}
+			return in, nil
+		}
+	}
+
+	var entries []tagstore.Entry
+	if err := json.Unmarshal(raw, &entries); err == nil && len(entries) > 0 {
+		return tagstore.RestoreInput{Entries: entries, Mode: direct.Mode}, nil
+	}
+
+	return tagstore.RestoreInput{}, fmt.Errorf("无法解析备份文件")
 }

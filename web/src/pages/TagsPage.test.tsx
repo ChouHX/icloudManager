@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import TagsPage from './TagsPage'
@@ -126,5 +126,28 @@ describe('TagsPage', { timeout: 15000 }, () => {
     await user.click(within(row!).getByRole('button', { name: /保\s*存/ }))
 
     expect(await screen.findByText(/已将「开发」重命名为「前端」/)).toBeInTheDocument()
+  })
+
+  it('从备份导入数据', async () => {
+    const user = userEvent.setup()
+    renderTags()
+    await screen.findByText('user@example.com')
+
+    await user.click(screen.getByRole('button', { name: /备份迁移/ }))
+    const dialog = await screen.findByRole('dialog')
+
+    const backup = {
+      version: 1,
+      type: 'icloud-hme-tags',
+      entries: [{ email: 'restored@example.com', tags: ['项目C'] }],
+    }
+    fireEvent.change(within(dialog).getByLabelText('备份 JSON 内容'), {
+      target: { value: JSON.stringify(backup) },
+    })
+    await user.click(within(dialog).getByRole('button', { name: /导入备份/ }))
+
+    expect(await within(dialog).findByText('导入完成')).toBeInTheDocument()
+    expect(within(dialog).getByText('新增')).toBeInTheDocument()
+    expect(within(dialog).getByText('跳过')).toBeInTheDocument()
   })
 })

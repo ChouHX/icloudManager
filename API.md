@@ -829,6 +829,62 @@ X-CSRF-Token: <token>
 
 从所有记录中移除该标签（不删除记录本身），返回受影响的记录数。
 
+**导出备份**
+
+```http
+GET /api/tags/export
+```
+
+```json
+{
+  "success": true,
+  "data": {
+    "version": 1,
+    "type": "icloud-hme-tags",
+    "exported_at": "2026-08-06T10:00:00+08:00",
+    "count": 2,
+    "entries": [ /* 全部记录，按创建时间排序 */ ]
+  }
+}
+```
+
+用于跨实例迁移：导出内容（`data`）即一份可直接导入的备份文档。
+
+**导入备份**
+
+```http
+POST /api/tags/restore
+X-CSRF-Token: <token>
+
+{
+  "version": 1,
+  "type": "icloud-hme-tags",
+  "entries": [ /* 备份中的记录 */ ],
+  "mode": "merge"
+}
+```
+
+`mode` 为 `merge`（默认，跳过已存在的「邮箱 + 网站」）或 `replace`（先清空再重建）。
+导入会重新校验每条记录并忽略备份内重复项，保留备份中的创建/更新时间；
+记录 ID 缺失或冲突时会重新生成。请求体兼容三种形态：备份对象、
+`{ success, data }` API 响应包裹，或纯记录数组。
+
+```json
+{
+  "success": true,
+  "data": {
+    "imported": 2,
+    "skipped": 1,
+    "invalid": 0,
+    "total": 3,
+    "errors": []
+  }
+}
+```
+
+备份类型/版本不匹配或没有可导入记录时返回 `400 VALIDATION_ERROR`。
+整个导入只落盘一次，保存失败会回滚内存状态。
+
 ---
 
 ## 6. 已知限制

@@ -177,8 +177,10 @@ func (s *Server) register() {
 
 			// ===== 标签凭据管理(独立于 iCloud 账号) =====
 			authed.GET("/tags", s.listTagsHandler)
+			authed.GET("/tags/export", s.exportTagsHandler)
 			authed.POST("/tags", csrfCheck(s.auth), s.createTagHandler)
 			authed.POST("/tags/import", csrfCheck(s.auth), s.importTagsHandler)
+			authed.POST("/tags/restore", csrfCheck(s.auth), s.restoreTagsHandler)
 			authed.PUT("/tags/:id", csrfCheck(s.auth), s.updateTagHandler)
 			authed.DELETE("/tags/:id", csrfCheck(s.auth), s.deleteTagHandler)
 			authed.PUT("/tag-labels/rename", csrfCheck(s.auth), s.renameTagLabelHandler)

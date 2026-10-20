@@ -263,3 +263,67 @@ func TestTagLabelsRenameAndDelete(t *testing.T) {
 		t.Fatalf("空标签应 400,得到 %d", status)
 	}
 }
+
+// TestTagsBackupExportRestore 验证备份导出与导入(含 CSRF)。
+func TestTagsBackupExportRestore(t *testing.T) {
+	s := mustServer(t, &fakeBackend{}, Config{
+		AdminPassword: "admin-pass-2026-strong",
+		DataDir:       t.TempDir(),
+	})
+	ts := httptest.NewServer(s.Handler())
+	defer ts.Close()
+	sess, csrf := login(t, ts, "admin-pass-2026-strong")
+
+	if status, body, _ := do(t, tagAuthed(t, ts, sess, csrf, "POST", "/api/tags", `{"email":"a@example.com","password":"p1","site":"GitHub","tags":["项目A"]}`)); status != http.StatusOK {
+		t.Fatalf("创建失败: %d %s", status, body)
+	}
+
+	// 导出
+	status, body, _ := do(t, tagAuthed(t, ts, sess, csrf, "GET", "/api/tags/export", ""))
+	if status != http.StatusOK {
+		t.Fatalf("导出失败: %d %s", status, body)
+	}
+	if !strings.Contains(body, `"type":"icloud-hme-tags"`) || !strings.Contains(body, `"version":1`) || !strings.Contains(body, `"count":1`) {
+		t.Fatalf("备份元信息缺失: %s", body)
+	}
+
+	// 提取备份 data 对象
+	var exported struct {
+		Data json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(body), &exported); err != nil {
+		t.Fatalf("解析导出响应失败: %v", err)
+	}
+
+	// 缺少 CSRF 应 403
+	req := tagAuthed(t, ts, sess, csrf, "POST", "/api/tags/restore", string(exported.Data))
+	req.Header.Del("X-CSRF-Token")
+	if status, _, _ := do(t, req); status != http.StatusForbidden {
+		t.Fatalf("缺少 CSRF 应 403,得到 %d", status)
+	}
+
+	// merge:已存在则跳过
+	status, body, _ = do(t, tagAuthed(t, ts, sess, csrf, "POST", "/api/tags/restore", string(exported.Data)))
+	if status != http.StatusOK || !strings.Contains(body, `"skipped":1`) {
+		t.Fatalf("merge 导入应跳过: %d %s", status, body)
+	}
+
+	// replace:清空重建
+	replaceBody := strings.TrimSuffix(string(exported.Data), "}") + `,"mode":"replace"}`
+	status, body, _ = do(t, tagAuthed(t, ts, sess, csrf, "POST", "/api/tags/restore", replaceBody))
+	if status != http.StatusOK || !strings.Contains(body, `"imported":1`) || !strings.Contains(body, `"total":1`) {
+		t.Fatalf("replace 导入失败: %d %s", status, body)
+	}
+
+	// 兼容纯数组格式
+	status, body, _ = do(t, tagAuthed(t, ts, sess, csrf, "POST", "/api/tags/restore", `[{"email":"arr@example.com"}]`))
+	if status != http.StatusOK || !strings.Contains(body, `"imported":1`) {
+		t.Fatalf("数组格式导入失败: %d %s", status, body)
+	}
+
+	// 非法内容应 400
+	status, _, _ = do(t, tagAuthed(t, ts, sess, csrf, "POST", "/api/tags/restore", `{}`))
+	if status != http.StatusBadRequest {
+		t.Fatalf("空备份应 400,得到 %d", status)
+	}
+}
