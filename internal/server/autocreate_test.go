@@ -370,6 +370,11 @@ func TestAutoCreateRunsAccountsInParallel(t *testing.T) {
 		defer mu.Unlock()
 		return make([]hme.Alias, created[accountID]), nil
 	}
+	createdCount := func(id string) int {
+		mu.Lock()
+		defer mu.Unlock()
+		return created[id]
+	}
 
 	s := newAutoTestServer(t, f)
 	target := 2
@@ -402,8 +407,8 @@ func TestAutoCreateRunsAccountsInParallel(t *testing.T) {
 		t.Fatalf("3 个账号各建 2 个应为 6,实际 %d", final.Created)
 	}
 	for _, id := range []string{"acc_1", "acc_2", "acc_3"} {
-		if created[id] != 2 {
-			t.Fatalf("账号 %s 应创建 2 个,实际 %d", id, created[id])
+		if got := createdCount(id); got != 2 {
+			t.Fatalf("账号 %s 应创建 2 个,实际 %d", id, got)
 		}
 	}
 	if final.Total != 6 {
@@ -429,6 +434,11 @@ func TestAutoCreateSkipsAccountsAlreadyAtTarget(t *testing.T) {
 		}
 		return make([]hme.Alias, created[accountID]), nil
 	}
+	createdCount := func(id string) int {
+		mu.Lock()
+		defer mu.Unlock()
+		return created[id]
+	}
 
 	s := newAutoTestServer(t, f)
 	target := 5
@@ -446,13 +456,13 @@ func TestAutoCreateSkipsAccountsAlreadyAtTarget(t *testing.T) {
 			}
 		}
 	}
-	if created["acc_full"] != 0 {
-		t.Fatalf("已达目标的账号不应创建,实际 %d", created["acc_full"])
+	if createdCount("acc_full") != 0 {
+		t.Fatalf("已达目标的账号不应创建,实际 %d", createdCount("acc_full"))
 	}
 
 	final := waitForPhase(t, s, phaseCompleted)
-	if created["acc_empty"] != 5 {
-		t.Fatalf("未达标账号应建满 5 个,实际 %d", created["acc_empty"])
+	if createdCount("acc_empty") != 5 {
+		t.Fatalf("未达标账号应建满 5 个,实际 %d", createdCount("acc_empty"))
 	}
 	if final.Created != 5 {
 		t.Fatalf("汇总创建数应为 5,实际 %d", final.Created)
