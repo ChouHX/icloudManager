@@ -3,6 +3,7 @@ import type { TableProps } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
 import { useDashboard } from '../api/hooks'
 import type { AccountSummary } from '../api/types'
+import { MOCK_DASHBOARD_DATA } from './DashboardPage.mock'
 
 /** 顶部紧凑统计卡片 */
 function StatItem({ label, value }: { label: string; value: number | string }) {
@@ -34,19 +35,20 @@ function AccountCard({ account }: { account: AccountSummary }) {
       : 0
 
   return (
-    <Card size="small" variant="borderless" style={{ height: '100%' }}>
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 8,
-        }}
-      >
-        <Typography.Text strong ellipsis style={{ maxWidth: 160 }}>
+    <Card
+      size="small"
+      variant="borderless"
+      style={{ height: '100%' }}
+      styles={{ body: { padding: 10 } }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+        <Typography.Text strong ellipsis style={{ maxWidth: 140, fontSize: 13 }}>
           {account.name}
         </Typography.Text>
-        <Tag color={STATUS_COLOR[account.status] ?? 'default'} style={{ marginInlineEnd: 0 }}>
+        <Tag
+          color={STATUS_COLOR[account.status] ?? 'default'}
+          style={{ marginInlineEnd: 0, fontSize: 11, lineHeight: '18px' }}
+        >
           {STATUS_LABEL[account.status] ?? account.status}
         </Tag>
       </div>
@@ -56,27 +58,43 @@ function AccountCard({ account }: { account: AccountSummary }) {
         className="mono"
         ellipsis
         copyable={account.icloud_email ? { text: account.icloud_email } : false}
-        style={{ display: 'block', marginTop: 4 }}
+        style={{ display: 'block', marginTop: 2, fontSize: 12 }}
       >
         {account.icloud_email || '—'}
       </Typography.Text>
 
-      <div style={{ display: 'flex', gap: 20, marginTop: 10 }}>
-        <div style={{ display: 'flex', flexDirection: 'column' }}>
-          <span className="stat-value">{account.alias_total}</span>
-          <span className="stat-label">别名总数</span>
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column' }}>
-          <span className="stat-value">{account.alias_active}</span>
-          <span className="stat-label">活跃别名</span>
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column' }}>
-          <span className="stat-value">{percent}%</span>
-          <span className="stat-label">活跃占比</span>
-        </div>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'baseline',
+          gap: 12,
+          marginTop: 6,
+          fontSize: 12,
+          color: '#64748b',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        <span>
+          别名{' '}
+          <b style={{ color: '#1f2937', fontVariantNumeric: 'tabular-nums' }}>
+            {account.alias_total}
+          </b>
+        </span>
+        <span>
+          活跃{' '}
+          <b style={{ color: '#1f2937', fontVariantNumeric: 'tabular-nums' }}>
+            {account.alias_active}
+          </b>
+        </span>
+        <span style={{ marginLeft: 'auto', fontVariantNumeric: 'tabular-nums' }}>{percent}%</span>
       </div>
 
-      <Progress percent={percent} size="small" showInfo={false} style={{ marginTop: 8 }} />
+      <Progress
+        percent={percent}
+        showInfo={false}
+        strokeWidth={4}
+        style={{ marginTop: 4, marginBottom: 0 }}
+      />
     </Card>
   )
 }
@@ -126,7 +144,11 @@ function UsageTable({ rows, labelTitle }: { rows: UsageRow[]; labelTitle: string
 
 /** 数据看板:汇总 iCloud 账号别名与标签凭据的网站/标签分布 */
 export default function DashboardPage() {
-  const { data, loading, error, reload } = useDashboard()
+  // 本地调试:URL 带 ?mock=1 时使用内置 Mock 数据,不请求后端
+  const mockMode =
+    import.meta.env.DEV && new URLSearchParams(window.location.search).get('mock') === '1'
+  const { data: fetched, loading, error, reload } = useDashboard(!mockMode)
+  const data = mockMode ? MOCK_DASHBOARD_DATA : fetched
 
   const accounts = data?.accounts
   const accountItems = accounts?.items ?? []
@@ -165,6 +187,15 @@ export default function DashboardPage() {
               重试
             </Button>
           }
+        />
+      )}
+
+      {mockMode && (
+        <Alert
+          type="info"
+          showIcon
+          message="当前为本地 Mock 数据（URL 带 ?mock=1），仅用于调试布局。"
+          style={{ marginBottom: 16 }}
         />
       )}
 

@@ -101,12 +101,12 @@ export function useTags(query = ''): {
   return useFetch<TagListResult>(`/api/tags${query}`)
 }
 
-/** 数据看板:iCloud 账号别名与标签凭据分布 */
-export function useDashboard(): {
+/** 数据看板:iCloud 账号别名与标签凭据分布。enabled=false 时不发请求(本地 mock 调试用) */
+export function useDashboard(enabled = true): {
   data: DashboardData | null
   loading: boolean
   error: string
   reload: () => void
 } {
-  return useFetch<DashboardData>('/api/dashboard')
+  return useFetch<DashboardData>(enabled ? '/api/dashboard' : null)
 }
