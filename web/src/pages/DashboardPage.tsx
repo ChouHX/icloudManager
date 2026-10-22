@@ -1,4 +1,4 @@
-import { Alert, Button, Card, Col, Progress, Row, Space, Table, Tag, Typography } from 'antd'
+import { Alert, Button, Card, Col, Empty, Progress, Row, Space, Table, Tag, Typography } from 'antd'
 import type { TableProps } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
 import { useDashboard } from '../api/hooks'
@@ -26,69 +26,58 @@ const STATUS_COLOR: Record<string, string> = {
   error: 'red',
 }
 
-/** iCloud 账号及其别名数量 */
-function AccountTable({ items }: { items: AccountSummary[] }) {
-  const columns: TableProps<AccountSummary>['columns'] = [
-    {
-      title: '账号',
-      dataIndex: 'name',
-      render: (name: string, row) => (
-        <Space size={6}>
-          <Typography.Text strong>{name}</Typography.Text>
-          <Tag color={STATUS_COLOR[row.status] ?? 'default'}>
-            {STATUS_LABEL[row.status] ?? row.status}
-          </Tag>
-        </Space>
-      ),
-    },
-    {
-      title: 'iCloud 邮箱',
-      dataIndex: 'icloud_email',
-      render: (email?: string) =>
-        email ? (
-          <Typography.Text className="mono" copyable={{ text: email }}>
-            {email}
-          </Typography.Text>
-        ) : (
-          <Typography.Text type="secondary">—</Typography.Text>
-        ),
-    },
-    {
-      title: '别名总数',
-      dataIndex: 'alias_total',
-      width: 110,
-      align: 'right',
-    },
-    {
-      title: '活跃别名',
-      dataIndex: 'alias_active',
-      width: 110,
-      align: 'right',
-    },
-    {
-      title: '活跃占比',
-      key: 'ratio',
-      width: 180,
-      render: (_, row) => {
-        const percent =
-          row.alias_total > 0
-            ? Math.min(100, Math.round((row.alias_active / row.alias_total) * 100))
-            : 0
-        return <Progress percent={percent} size="small" />
-      },
-    },
-  ]
+/** iCloud 账号卡片:紧凑展示别名数量与活跃占比 */
+function AccountCard({ account }: { account: AccountSummary }) {
+  const percent =
+    account.alias_total > 0
+      ? Math.min(100, Math.round((account.alias_active / account.alias_total) * 100))
+      : 0
 
   return (
-    <Table<AccountSummary>
-      rowKey="id"
-      columns={columns}
-      dataSource={items}
-      pagination={false}
-      size="small"
-      scroll={{ x: 760 }}
-      locale={{ emptyText: '暂无 iCloud 账号' }}
-    />
+    <Card size="small" variant="borderless" style={{ height: '100%' }}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 8,
+        }}
+      >
+        <Typography.Text strong ellipsis style={{ maxWidth: 160 }}>
+          {account.name}
+        </Typography.Text>
+        <Tag color={STATUS_COLOR[account.status] ?? 'default'} style={{ marginInlineEnd: 0 }}>
+          {STATUS_LABEL[account.status] ?? account.status}
+        </Tag>
+      </div>
+
+      <Typography.Text
+        type="secondary"
+        className="mono"
+        ellipsis
+        copyable={account.icloud_email ? { text: account.icloud_email } : false}
+        style={{ display: 'block', marginTop: 4 }}
+      >
+        {account.icloud_email || '—'}
+      </Typography.Text>
+
+      <div style={{ display: 'flex', gap: 20, marginTop: 10 }}>
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
+          <span className="stat-value">{account.alias_total}</span>
+          <span className="stat-label">别名总数</span>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
+          <span className="stat-value">{account.alias_active}</span>
+          <span className="stat-label">活跃别名</span>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
+          <span className="stat-value">{percent}%</span>
+          <span className="stat-label">活跃占比</span>
+        </div>
+      </div>
+
+      <Progress percent={percent} size="small" showInfo={false} style={{ marginTop: 8 }} />
+    </Card>
   )
 }
 
@@ -140,6 +129,7 @@ export default function DashboardPage() {
   const { data, loading, error, reload } = useDashboard()
 
   const accounts = data?.accounts
+  const accountItems = accounts?.items ?? []
   const tags = data?.tags
   const siteRows: UsageRow[] = (tags?.by_site ?? []).map((item) => ({
     key: item.site,
@@ -191,7 +181,17 @@ export default function DashboardPage() {
 
       <Space orientation="vertical" size={16} style={{ width: '100%' }}>
         <Card title="iCloud 账号与别名" variant="borderless" loading={loading && !data}>
-          <AccountTable items={accounts?.items ?? []} />
+          {accountItems.length === 0 ? (
+            <Empty description="暂无 iCloud 账号" />
+          ) : (
+            <Row gutter={[12, 12]}>
+              {accountItems.map((account) => (
+                <Col key={account.id} xs={24} sm={12} lg={8} xl={6}>
+                  <AccountCard account={account} />
+                </Col>
+              ))}
+            </Row>
+          )}
         </Card>
 
         <Row gutter={[16, 16]}>
