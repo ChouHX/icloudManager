@@ -4,36 +4,42 @@ import {
   App as AntdApp,
   Button,
   Card,
+  Col,
   DatePicker,
+  Divider,
   Form,
   Input,
   Modal,
   Popconfirm,
+  Popover,
+  Progress,
   Result,
+  Row,
   Select,
   Space,
+  Spin,
   Table,
   Tag,
-  Tooltip,
   Typography,
 } from 'antd'
 import type { TableProps } from 'antd'
 import type { Dayjs } from 'dayjs'
 import {
+  BarChartOutlined,
   DeleteOutlined,
   DownloadOutlined,
   EditOutlined,
   ExportOutlined,
-  InfoCircleOutlined,
   PlusOutlined,
   ReloadOutlined,
   TagOutlined,
   TagsOutlined,
   UploadOutlined,
 } from '@ant-design/icons'
+import { useNavigate } from 'react-router-dom'
 import { ApiError, request } from '../api/client'
-import { useTags } from '../api/hooks'
-import type { TagBatchFilter, TagEntry, TagEntryInput } from '../api/types'
+import { useDashboard, useTags } from '../api/hooks'
+import type { DashboardData, TagBatchFilter, TagEntry, TagEntryInput } from '../api/types'
 import { formatDateTime } from '../utils/format'
 import {
   TagBackupModal,
@@ -193,12 +199,120 @@ function TagFormModal({
   )
 }
 
-/** 顶部紧凑统计卡片 */
-function StatItem({ label, value }: { label: string; value: number }) {
+/** Popover 内的迷你统计格 */
+function StatBox({ label, value }: { label: string; value: number }) {
   return (
-    <div className="stat-item">
-      <span className="stat-value">{value}</span>
-      <span className="stat-label">{label}</span>
+    <div
+      style={{
+        background: '#f8fafc',
+        border: '1px solid #eef1f5',
+        borderRadius: 8,
+        padding: '6px 8px',
+        textAlign: 'center',
+      }}
+    >
+      <div style={{ fontSize: 16, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+        {value}
+      </div>
+      <div style={{ fontSize: 11, color: '#64748b' }}>{label}</div>
+    </div>
+  )
+}
+
+/** 统计数据 Popover:汇总标签账号 + 网站/标签分布 */
+function TagStatsPopover({
+  loading,
+  tags,
+  onOpenDashboard,
+}: {
+  loading: boolean
+  tags: DashboardData['tags'] | null
+  onOpenDashboard: () => void
+}) {
+  if (loading && !tags) {
+    return (
+      <div style={{ width: 380, textAlign: 'center', padding: 16 }}>
+        <Spin size="small" />
+      </div>
+    )
+  }
+
+  const bySite = tags?.by_site ?? []
+  const byTag = tags?.by_tag ?? []
+  const maxSite = bySite.reduce((max, item) => Math.max(max, item.count), 0)
+  const maxTag = byTag.reduce((max, item) => Math.max(max, item.count), 0)
+
+  return (
+    <div style={{ width: 380 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+        <StatBox label="记录总数" value={tags?.total ?? 0} />
+        <StatBox label="已打标签" value={tags?.tagged ?? 0} />
+        <StatBox label="未打标签" value={tags?.untagged ?? 0} />
+        <StatBox label="标签种类" value={tags?.tag_kinds ?? 0} />
+        <StatBox label="网站种类" value={tags?.site_kinds ?? 0} />
+      </div>
+
+      <Divider style={{ margin: '12px 0' }} />
+
+      <Row gutter={16}>
+        <Col span={12}>
+          <Typography.Text strong style={{ fontSize: 13 }}>
+            按网站
+          </Typography.Text>
+          {bySite.length === 0 ? (
+            <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12 }}>
+              暂无数据
+            </Typography.Text>
+          ) : (
+            bySite.slice(0, 5).map((item) => (
+              <div key={item.site} style={{ marginTop: 6 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+                  <Typography.Text ellipsis style={{ maxWidth: 110, fontSize: 12 }}>
+                    {item.site}
+                  </Typography.Text>
+                  <span style={{ fontVariantNumeric: 'tabular-nums' }}>{item.count}</span>
+                </div>
+                <Progress
+                  percent={maxSite > 0 ? Math.round((item.count / maxSite) * 100) : 0}
+                  showInfo={false}
+                  strokeWidth={4}
+                />
+              </div>
+            ))
+          )}
+        </Col>
+        <Col span={12}>
+          <Typography.Text strong style={{ fontSize: 13 }}>
+            按标签
+          </Typography.Text>
+          {byTag.length === 0 ? (
+            <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12 }}>
+              暂无数据
+            </Typography.Text>
+          ) : (
+            byTag.slice(0, 5).map((item) => (
+              <div key={item.tag} style={{ marginTop: 6 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+                  <Typography.Text ellipsis style={{ maxWidth: 110, fontSize: 12 }}>
+                    {item.tag}
+                  </Typography.Text>
+                  <span style={{ fontVariantNumeric: 'tabular-nums' }}>{item.count}</span>
+                </div>
+                <Progress
+                  percent={maxTag > 0 ? Math.round((item.count / maxTag) * 100) : 0}
+                  showInfo={false}
+                  strokeWidth={4}
+                />
+              </div>
+            ))
+          )}
+        </Col>
+      </Row>
+
+      <Divider style={{ margin: '12px 0' }} />
+      <Button type="link" size="small" style={{ padding: 0 }} onClick={onOpenDashboard}>
+        查看完整数据看板 →
+      </Button>
     </div>
   )
 }
@@ -240,7 +354,15 @@ export default function TagsPage() {
   }, [page, pageSize, search, selectedTags, site, dateRange])
 
   const { data, loading, error, reload } = useTags(query)
+  const { data: dashboard, loading: dashboardLoading, reload: reloadDashboard } = useDashboard()
   const { message } = AntdApp.useApp()
+  const navigate = useNavigate()
+
+  /** 同时刷新列表与统计数据 */
+  function refreshAll() {
+    reload()
+    reloadDashboard()
+  }
 
   const [formOpen, setFormOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
@@ -290,7 +412,7 @@ export default function TagsPage() {
     try {
       await request(`/api/tags/${encodeURIComponent(entry.id)}`, { method: 'DELETE' })
       message.success('记录已删除')
-      reload()
+      refreshAll()
     } catch (err) {
       message.error(err instanceof ApiError ? err.message : '删除失败，请重试')
     }
@@ -393,23 +515,26 @@ export default function TagsPage() {
   return (
     <div className="page">
       <div className="page-head">
-        <div className="stat-strip">
-          <Tooltip title="记录邮箱、网站密码与项目标签，用于区分每个项目使用的账号（与 iCloud 账号无关）">
-            <Button
-              type="text"
-              size="small"
-              shape="circle"
-              className="stat-info"
-              icon={<InfoCircleOutlined />}
-              aria-label="标签账号说明"
-            />
-          </Tooltip>
-          <StatItem label="记录" value={stats.total} />
-          <StatItem label="标签" value={stats.tags} />
-          <StatItem label="网站" value={stats.sites} />
-          <StatItem label="未打标签" value={stats.untagged} />
+        <div>
+          <h2>标签账号</h2>
+          <p>记录邮箱、网站密码与项目标签，用于区分每个项目使用的账号（与 iCloud 账号无关）</p>
         </div>
         <Space wrap>
+          <Popover
+            trigger="click"
+            placement="bottomLeft"
+            content={
+              <TagStatsPopover
+                loading={dashboardLoading}
+                tags={dashboard?.tags ?? null}
+                onOpenDashboard={() => navigate('/dashboard')}
+              />
+            }
+          >
+            <Button icon={<BarChartOutlined />} disabled={stats.total === 0}>
+              统计数据
+            </Button>
+          </Popover>
           <Button icon={<UploadOutlined />} onClick={() => setImportOpen(true)}>
             批量导入
           </Button>
@@ -501,7 +626,7 @@ export default function TagsPage() {
             placeholder={['创建起始', '创建结束']}
             title="按创建时间筛选（批量导入的记录即导入时间）"
           />
-          <Button icon={<ReloadOutlined />} onClick={reload} aria-label="刷新列表" />
+          <Button icon={<ReloadOutlined />} onClick={refreshAll} aria-label="刷新列表" />
         </div>
 
         {error && (
@@ -511,7 +636,7 @@ export default function TagsPage() {
             message={error}
             style={{ marginBottom: 16 }}
             action={
-              <Button size="small" onClick={reload}>
+              <Button size="small" onClick={refreshAll}>
                 重试
               </Button>
             }
@@ -567,7 +692,7 @@ export default function TagsPage() {
         onClose={() => setFormOpen(false)}
         onSaved={() => {
           message.success(editing ? '记录已更新' : '记录已添加')
-          reload()
+          refreshAll()
         }}
       />
 
@@ -580,7 +705,7 @@ export default function TagsPage() {
           tagOptions={tagOptions}
           onClose={() => setBatchOpen(false)}
           onDone={() => {
-            reload()
+            refreshAll()
             setSelectedIds([])
           }}
         />
@@ -608,7 +733,7 @@ export default function TagsPage() {
           filterActive={hasFilters}
           onClose={() => setDeleteOpen(false)}
           onDone={() => {
-            reload()
+            refreshAll()
             setSelectedIds([])
           }}
         />
@@ -619,7 +744,7 @@ export default function TagsPage() {
           open
           tagOptions={tagOptions}
           onClose={() => setImportOpen(false)}
-          onImported={() => reload()}
+          onImported={() => refreshAll()}
         />
       )}
 
@@ -629,12 +754,12 @@ export default function TagsPage() {
           tags={tagOptions}
           counts={tagCounts}
           onClose={() => setManageOpen(false)}
-          onChanged={() => reload()}
+          onChanged={() => refreshAll()}
         />
       )}
 
       {backupOpen && (
-        <TagBackupModal open onClose={() => setBackupOpen(false)} onRestored={() => reload()} />
+        <TagBackupModal open onClose={() => setBackupOpen(false)} onRestored={() => refreshAll()} />
       )}
     </div>
   )

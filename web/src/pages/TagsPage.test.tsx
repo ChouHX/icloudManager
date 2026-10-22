@@ -347,4 +347,26 @@ describe('TagsPage', { timeout: 30000 }, () => {
     await user.click(within(dialog).getByRole('button', { name: /删\s*除/ }))
     expect(await screen.findByText('已删除 2 条记录')).toBeInTheDocument()
   })
+
+  it('统计数据 Popover 展示标签分布', async () => {
+    const user = userEvent.setup()
+    renderTags()
+    await screen.findByText('user@example.com')
+
+    await user.click(screen.getByRole('button', { name: /统计数据/ }))
+
+    const popover = await waitFor(() => {
+      const el = document.querySelector('.ant-popover')
+      if (!el) throw new Error('popover 未打开')
+      return el as HTMLElement
+    })
+    for (const label of ['记录总数', '已打标签', '未打标签', '标签种类', '网站种类']) {
+      expect(within(popover).getByText(label)).toBeInTheDocument()
+    }
+    expect(within(popover).getByText('按网站')).toBeInTheDocument()
+    expect(within(popover).getByText('按标签')).toBeInTheDocument()
+    expect(within(popover).getByText('GitHub')).toBeInTheDocument()
+    expect(within(popover).getByText('开发')).toBeInTheDocument()
+    expect(within(popover).getByText('查看完整数据看板 →')).toBeInTheDocument()
+  })
 })
