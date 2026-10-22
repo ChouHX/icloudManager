@@ -337,19 +337,13 @@ describe('TagsPage', { timeout: 30000 }, () => {
     expect(await screen.findByText('已删除 1 条记录')).toBeInTheDocument()
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
 
-    // 清空筛选后删除全部，需输入确认文本
+    // 清空筛选后删除全部
     await user.click(siteSelect.querySelector('.ant-select-clear') as HTMLElement)
     await waitFor(() => expect(screen.getByText('gamer@example.com')).toBeInTheDocument())
 
     await user.click(screen.getByRole('button', { name: /批量删除/ }))
     dialog = await screen.findByRole('dialog')
     expect(within(dialog).getByText('全部记录（2 条）')).toBeInTheDocument()
-    expect(within(dialog).getByRole('button', { name: /删\s*除/ })).toBeDisabled()
-
-    await user.type(within(dialog).getByLabelText('输入 删除全部 以确认'), '删除全部')
-    await waitFor(() =>
-      expect(within(dialog).getByRole('button', { name: /删\s*除/ })).toBeEnabled(),
-    )
     await user.click(within(dialog).getByRole('button', { name: /删\s*除/ }))
     expect(await screen.findByText('已删除 2 条记录')).toBeInTheDocument()
   })

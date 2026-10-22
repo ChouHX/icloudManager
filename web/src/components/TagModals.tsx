@@ -737,14 +737,12 @@ export function TagDeleteModal({
   const [scope, setScope] = useState<'ids' | 'filter' | 'all'>(
     selectedIds.length > 0 ? 'ids' : filterActive ? 'filter' : 'all',
   )
-  const [confirmText, setConfirmText] = useState('')
   const [deleting, setDeleting] = useState(false)
   const [error, setError] = useState('')
 
   const targetCount =
     scope === 'ids' ? selectedIds.length : scope === 'filter' ? filteredCount : totalCount
   const missingFilter = scope === 'filter' && !filterActive
-  const allConfirmed = scope !== 'all' || confirmText.trim() === '删除全部'
 
   async function handleDelete() {
     if (missingFilter) {
@@ -757,10 +755,6 @@ export function TagDeleteModal({
     }
     if (targetCount === 0) {
       setError('当前范围没有可删除的记录，请先调整范围')
-      return
-    }
-    if (!allConfirmed) {
-      setError('请输入「删除全部」以确认删除所有记录')
       return
     }
     const body: TagDeleteInput =
@@ -793,7 +787,7 @@ export function TagDeleteModal({
       okText="删除"
       cancelText="取消"
       confirmLoading={deleting}
-      okButtonProps={{ danger: true, disabled: missingFilter || !allConfirmed }}
+      okButtonProps={{ danger: true, disabled: missingFilter }}
       onOk={() => void handleDelete()}
     >
       {error && <Alert type="error" showIcon title={error} style={{ marginBottom: 16 }} />}
@@ -834,21 +828,6 @@ export function TagDeleteModal({
           title="删除后无法恢复"
           description="记录及其标签会被永久删除，建议先使用「批量导出」备份。"
         />
-
-        {scope === 'all' && (
-          <div>
-            <Typography.Text strong>确认删除全部记录</Typography.Text>
-            <Typography.Paragraph type="secondary" style={{ margin: '4px 0 8px' }}>
-              此操作会清空全部 {totalCount} 条记录，请输入「删除全部」确认。
-            </Typography.Paragraph>
-            <Input
-              value={confirmText}
-              onChange={(e) => setConfirmText(e.target.value)}
-              placeholder="删除全部"
-              aria-label="输入 删除全部 以确认"
-            />
-          </div>
-        )}
 
         <Alert type="info" showIcon title={`将删除 ${targetCount} 条记录`} />
       </Space>
