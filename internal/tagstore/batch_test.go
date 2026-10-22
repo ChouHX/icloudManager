@@ -129,6 +129,71 @@ func TestBatchTagByCreatedTime(t *testing.T) {
 	}
 }
 
+func TestBatchDeleteByIDsFilterAndAll(t *testing.T) {
+	s := newTestStore(t)
+
+	githubA, err := s.Create(Input{Email: "a@example.com", Site: "GitHub", Tags: []string{"项目A"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	githubB, err := s.Create(Input{Email: "b@example.com", Site: "GitHub"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	steam, err := s.Create(Input{Email: "c@example.com", Site: "Steam", Tags: []string{"游戏"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 空条件且未显式 all 时应拒绝,避免误删全部
+	if _, err := s.BatchDelete(DeleteQuery{}); err == nil {
+		t.Fatal("空条件应返回参数错误")
+	} else {
+		var invalid *BatchValidationError
+		if !errors.As(err, &invalid) {
+			t.Fatalf("应返回 BatchValidationError,得到 %v", err)
+		}
+	}
+	if entries := s.List(); len(entries) != 3 {
+		t.Fatalf("校验失败时不应删除数据: %+v", entries)
+	}
+
+	// all 不能与筛选条件同时使用
+	if _, err := s.BatchDelete(DeleteQuery{All: true, Filter: ListQuery{Site: "GitHub"}}); err == nil {
+		t.Fatal("all 与 filter 同时使用应返回参数错误")
+	}
+
+	// 按 ID 删除,不存在的 ID 忽略
+	affected, err := s.BatchDelete(DeleteQuery{IDs: []string{githubA.ID, "tag_missing", githubA.ID, ""}})
+	if err != nil || affected != 1 {
+		t.Fatalf("按 ID 删除失败: affected=%d err=%v", affected, err)
+	}
+	if _, ok := s.Get(githubA.ID); ok {
+		t.Fatal("记录应已删除")
+	}
+
+	// 按筛选删除
+	affected, err = s.BatchDelete(DeleteQuery{Filter: ListQuery{Site: "github"}})
+	if err != nil || affected != 1 {
+		t.Fatalf("按筛选删除失败: affected=%d err=%v", affected, err)
+	}
+	if _, ok := s.Get(githubB.ID); ok {
+		t.Fatal("GitHub 记录应已删除")
+	}
+	if _, ok := s.Get(steam.ID); !ok {
+		t.Fatal("未命中的记录不应被删除")
+	}
+
+	// 显式 all 删除全部
+	affected, err = s.BatchDelete(DeleteQuery{All: true})
+	if err != nil || affected != 1 {
+		t.Fatalf("全部删除失败: affected=%d err=%v", affected, err)
+	}
+	if entries := s.List(); len(entries) != 0 {
+		t.Fatalf("全部删除后应无记录: %+v", entries)
+	}
+}
+
 func TestBatchTagValidation(t *testing.T) {
 	s := newTestStore(t)
 	if _, err := s.Create(Input{Email: "a@example.com", Site: "GitHub"}); err != nil {

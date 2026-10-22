@@ -819,6 +819,39 @@ X-CSRF-Token: <token>
 - 所有写入在同一个 SQLite 事务内完成，任一步失败都会整体回滚。
 - 时间筛选基于 `created_at`；通过批量导入新增的记录，其 `created_at` 即导入时间。
 
+**批量删除记录**
+
+```http
+POST /api/tags/batch-delete
+X-CSRF-Token: <token>
+
+{
+  "filter": { "site": "GitHub", "created_from": "2026-08-01T00:00:00+08:00", "created_to": "2026-08-31T23:59:59+08:00" }
+}
+```
+
+按 ID 精确删除时改用 `ids`：
+
+```json
+{ "ids": ["tag_1a2b3c4d", "tag_2b3c4d5e"] }
+```
+
+删除全部记录必须显式传入 `all`：
+
+```json
+{ "all": true }
+```
+
+- `ids` 非空时按 ID 删除，不存在的 ID 会被忽略。
+- `ids` 为空时按 `filter` 删除；`filter` 字段与列表接口一致。
+- `all` 为 `true` 时删除全部记录，不能与 `ids` 或 `filter` 同时使用。
+- `ids`、有效 `filter` 与 `all` 都未提供时返回 `400 VALIDATION_ERROR`，避免空请求误删全部。
+- 删除记录会级联删除其标签，操作在同一个 SQLite 事务内完成。
+
+```json
+{ "success": true, "data": { "affected": 2 } }
+```
+
 **批量导入**
 
 ```http
@@ -984,6 +1017,46 @@ X-CSRF-Token: <token>
 
 备份类型/版本不匹配或没有可导入记录时返回 `400 VALIDATION_ERROR`。
 所有写入在同一个 SQLite 事务内完成，任一步失败都会整体回滚。
+
+### 5.13 数据看板
+
+```http
+GET /api/dashboard
+```
+
+返回 iCloud 账号的别名数量，以及标签凭据的网站 / 标签分布。
+
+```json
+{
+  "success": true,
+  "data": {
+    "accounts": {
+      "total": 2,
+      "alias_total": 13,
+      "alias_active": 7,
+      "items": [ /* account.Summary 列表，含 alias_total / alias_active */ ]
+    },
+    "tags": {
+      "total": 3,
+      "tagged": 2,
+      "untagged": 1,
+      "tag_kinds": 2,
+      "site_kinds": 1,
+      "by_site": [
+        { "site": "GitHub", "count": 2 }
+      ],
+      "by_tag": [
+        { "tag": "开发", "count": 2 },
+        { "tag": "项目A", "count": 1 }
+      ]
+    }
+  }
+}
+```
+
+- `accounts.alias_total` / `accounts.alias_active` 是各账号最后一次检测时记录的数量，不会触发上游请求。
+- `tags.tagged` 等于 `tags.total - tags.untagged`。
+- `by_site` 按网站分组（忽略大小写），按记录数降序；`by_tag` 按标签字母序。
 
 ---
 

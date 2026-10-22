@@ -156,6 +156,39 @@ func (s *Server) batchTagsHandler(c *gin.Context) {
 	ok(c, result)
 }
 
+// batchDeleteTagsHandler 处理 POST /api/tags/batch-delete,按 ID、筛选条件或全部记录批量删除。
+func (s *Server) batchDeleteTagsHandler(c *gin.Context) {
+	var req struct {
+		IDs    []string         `json:"ids"`
+		Filter tagFilterRequest `json:"filter"`
+		All    bool             `json:"all"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		failCode(c, http.StatusBadRequest, "VALIDATION_ERROR", "参数错误")
+		return
+	}
+	if err := validateTimeRange(req.Filter.CreatedFrom, req.Filter.CreatedTo); err != nil {
+		failCode(c, http.StatusBadRequest, "VALIDATION_ERROR", err.Error())
+		return
+	}
+
+	affected, err := s.tags.BatchDelete(tagstore.DeleteQuery{
+		IDs:    req.IDs,
+		Filter: req.Filter.listQuery(),
+		All:    req.All,
+	})
+	if err != nil {
+		var invalid *tagstore.BatchValidationError
+		if errors.As(err, &invalid) {
+			failCode(c, http.StatusBadRequest, "VALIDATION_ERROR", invalid.Message)
+			return
+		}
+		failCode(c, http.StatusInternalServerError, "INTERNAL_ERROR", "批量删除失败")
+		return
+	}
+	ok(c, gin.H{"affected": affected})
+}
+
 // validateTimeRange 校验 RFC3339 时间参数,并确保起始不晚于结束。
 func validateTimeRange(from, to string) error {
 	var fromTime, toTime time.Time

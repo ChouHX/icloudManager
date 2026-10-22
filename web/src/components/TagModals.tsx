@@ -32,6 +32,8 @@ import type {
   TagBatchFilter,
   TagBatchInput,
   TagBatchResult,
+  TagDeleteInput,
+  TagDeleteResult,
   TagEntry,
   TagExportInput,
   TagImportInput,
@@ -706,6 +708,149 @@ export function TagExportModal({
           description="请妥善保管，避免通过不安全的渠道传输。"
         />
         <Alert type="info" showIcon title={`将导出 ${targetCount} 条记录`} />
+      </Space>
+    </Modal>
+  )
+}
+
+/** 批量删除勾选 / 筛选 / 全部记录,删除后不可恢复 */
+export function TagDeleteModal({
+  open,
+  filteredCount,
+  totalCount,
+  selectedIds,
+  filter,
+  filterActive,
+  onClose,
+  onDone,
+}: {
+  open: boolean
+  filteredCount: number
+  totalCount: number
+  selectedIds: string[]
+  filter: TagBatchFilter
+  filterActive: boolean
+  onClose: () => void
+  onDone: () => void
+}) {
+  const { message } = AntdApp.useApp()
+  const [scope, setScope] = useState<'ids' | 'filter' | 'all'>(
+    selectedIds.length > 0 ? 'ids' : filterActive ? 'filter' : 'all',
+  )
+  const [confirmText, setConfirmText] = useState('')
+  const [deleting, setDeleting] = useState(false)
+  const [error, setError] = useState('')
+
+  const targetCount =
+    scope === 'ids' ? selectedIds.length : scope === 'filter' ? filteredCount : totalCount
+  const missingFilter = scope === 'filter' && !filterActive
+  const allConfirmed = scope !== 'all' || confirmText.trim() === '删除全部'
+
+  async function handleDelete() {
+    if (missingFilter) {
+      setError('当前没有筛选条件，请先设置筛选，或选择勾选记录 / 全部记录')
+      return
+    }
+    if (scope === 'ids' && selectedIds.length === 0) {
+      setError('请先在列表中勾选要删除的记录')
+      return
+    }
+    if (targetCount === 0) {
+      setError('当前范围没有可删除的记录，请先调整范围')
+      return
+    }
+    if (!allConfirmed) {
+      setError('请输入「删除全部」以确认删除所有记录')
+      return
+    }
+    const body: TagDeleteInput =
+      scope === 'ids' ? { ids: selectedIds } : scope === 'filter' ? { filter } : { all: true }
+    setDeleting(true)
+    setError('')
+    try {
+      const result = await request<TagDeleteResult>('/api/tags/batch-delete', {
+        method: 'POST',
+        body,
+      })
+      message.success(`已删除 ${result.affected} 条记录`)
+      onDone()
+      onClose()
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : '删除失败，请重试')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  return (
+    <Modal
+      open={open}
+      title="批量删除"
+      width={560}
+      onCancel={onClose}
+      destroyOnHidden
+      mask={{ closable: false }}
+      okText="删除"
+      cancelText="取消"
+      confirmLoading={deleting}
+      okButtonProps={{ danger: true, disabled: missingFilter || !allConfirmed }}
+      onOk={() => void handleDelete()}
+    >
+      {error && <Alert type="error" showIcon title={error} style={{ marginBottom: 16 }} />}
+
+      <Space orientation="vertical" size={18} style={{ width: '100%' }}>
+        <div>
+          <Typography.Text strong>删除范围</Typography.Text>
+          <Radio.Group
+            value={scope}
+            onChange={(e) => {
+              setScope(e.target.value as 'ids' | 'filter' | 'all')
+              setError('')
+            }}
+            style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}
+          >
+            <Radio value="ids" disabled={selectedIds.length === 0}>
+              已勾选的记录（{selectedIds.length} 条）
+            </Radio>
+            <Radio value="filter">
+              当前筛选结果（{filteredCount} 条）
+            </Radio>
+            <Radio value="all">全部记录（{totalCount} 条）</Radio>
+          </Radio.Group>
+          {missingFilter && (
+            <Alert
+              type="warning"
+              showIcon
+              title="当前没有筛选条件"
+              description="为避免误删全部记录，请先设置搜索、标签、网站或时间条件，或改为勾选具体记录。"
+              style={{ marginTop: 8 }}
+            />
+          )}
+        </div>
+
+        <Alert
+          type="error"
+          showIcon
+          title="删除后无法恢复"
+          description="记录及其标签会被永久删除，建议先使用「批量导出」备份。"
+        />
+
+        {scope === 'all' && (
+          <div>
+            <Typography.Text strong>确认删除全部记录</Typography.Text>
+            <Typography.Paragraph type="secondary" style={{ margin: '4px 0 8px' }}>
+              此操作会清空全部 {totalCount} 条记录，请输入「删除全部」确认。
+            </Typography.Paragraph>
+            <Input
+              value={confirmText}
+              onChange={(e) => setConfirmText(e.target.value)}
+              placeholder="删除全部"
+              aria-label="输入 删除全部 以确认"
+            />
+          </div>
+        )}
+
+        <Alert type="info" showIcon title={`将删除 ${targetCount} 条记录`} />
       </Space>
     </Modal>
   )

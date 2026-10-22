@@ -514,6 +514,82 @@ func TestTagsBatchByFilterAndIDs(t *testing.T) {
 	}
 }
 
+// TestTagsBatchDelete 验证按勾选 ID、筛选条件和全部记录批量删除。
+func TestTagsBatchDelete(t *testing.T) {
+	s := mustServer(t, &fakeBackend{}, Config{
+		AdminPassword: "admin-pass-2026-strong",
+		DataDir:       t.TempDir(),
+	})
+	ts := httptest.NewServer(s.Handler())
+	defer ts.Close()
+	sess, csrf := login(t, ts, "admin-pass-2026-strong")
+
+	ids := make([]string, 0, 3)
+	for _, payload := range []string{
+		`{"email":"a@example.com","site":"GitHub"}`,
+		`{"email":"b@example.com","site":"GitHub"}`,
+		`{"email":"c@example.com","site":"Steam"}`,
+	} {
+		status, body, _ := do(t, tagAuthed(t, ts, sess, csrf, "POST", "/api/tags", payload))
+		if status != http.StatusOK {
+			t.Fatalf("创建失败: %d %s", status, body)
+		}
+		var created struct {
+			Data struct {
+				ID string `json:"id"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal([]byte(body), &created); err != nil {
+			t.Fatalf("解析创建响应: %v", err)
+		}
+		ids = append(ids, created.Data.ID)
+	}
+
+	// 缺少 CSRF 应 403。
+	req := tagAuthed(t, ts, sess, csrf, "POST", "/api/tags/batch-delete", `{"ids":["`+ids[0]+`"]}`)
+	req.Header.Del("X-CSRF-Token")
+	if status, _, _ := do(t, req); status != http.StatusForbidden {
+		t.Fatalf("缺少 CSRF 应 403,得到 %d", status)
+	}
+
+	// 空条件应拒绝,避免误删全部。
+	status, body, _ := do(t, tagAuthed(t, ts, sess, csrf, "POST", "/api/tags/batch-delete", `{}`))
+	if status != http.StatusBadRequest || !strings.Contains(body, "请先筛选或勾选") {
+		t.Fatalf("空条件应 400: %d %s", status, body)
+	}
+
+	// 按勾选 ID 删除。
+	status, body, _ = do(t, tagAuthed(t, ts, sess, csrf, "POST", "/api/tags/batch-delete", `{"ids":["`+ids[0]+`"]}`))
+	if status != http.StatusOK || !strings.Contains(body, `"affected":1`) {
+		t.Fatalf("按 ID 删除失败: %d %s", status, body)
+	}
+
+	// 按筛选条件删除。
+	status, body, _ = do(t, tagAuthed(t, ts, sess, csrf, "POST", "/api/tags/batch-delete", `{"filter":{"site":"github"}}`))
+	if status != http.StatusOK || !strings.Contains(body, `"affected":1`) {
+		t.Fatalf("按筛选删除失败: %d %s", status, body)
+	}
+
+	// 显式 all 删除全部。
+	status, body, _ = do(t, tagAuthed(t, ts, sess, csrf, "POST", "/api/tags/batch-delete", `{"all":true}`))
+	if status != http.StatusOK || !strings.Contains(body, `"affected":1`) {
+		t.Fatalf("全部删除失败: %d %s", status, body)
+	}
+
+	// 删除后列表应为空。
+	status, body, _ = do(t, tagAuthed(t, ts, sess, csrf, "GET", "/api/tags", ""))
+	if status != http.StatusOK || !strings.Contains(body, `"count":0`) {
+		t.Fatalf("全部删除后列表应为空: %d %s", status, body)
+	}
+
+	// 非法时间参数应 400。
+	status, _, _ = do(t, tagAuthed(t, ts, sess, csrf, "POST", "/api/tags/batch-delete",
+		`{"filter":{"created_from":"2026-08-02T00:00:00+08:00","created_to":"2026-08-01T00:00:00+08:00"}}`))
+	if status != http.StatusBadRequest {
+		t.Fatalf("非法时间参数应 400,得到 %d", status)
+	}
+}
+
 // TestTagsExportSelection 验证按勾选 ID、筛选条件和全部记录导出。
 func TestTagsExportSelection(t *testing.T) {
 	s := mustServer(t, &fakeBackend{}, Config{

@@ -152,6 +152,31 @@ export interface TagUsageCount {
   count: number
 }
 
+/** 单个网站的使用记录数 */
+export interface SiteUsageCount {
+  site: string
+  count: number
+}
+
+/** 数据看板统计 */
+export interface DashboardData {
+  accounts: {
+    total: number
+    alias_total: number
+    alias_active: number
+    items: AccountSummary[]
+  }
+  tags: {
+    total: number
+    tagged: number
+    untagged: number
+    tag_kinds: number
+    site_kinds: number
+    by_site: SiteUsageCount[]
+    by_tag: TagUsageCount[]
+  }
+}
+
 /** 标签凭据列表结果(服务端分页) */
 export interface TagListResult {
   /** 符合筛选条件的记录总数 */
@@ -206,6 +231,18 @@ export interface TagBatchResult {
 export interface TagExportInput {
   ids?: string[]
   filter?: TagBatchFilter
+}
+
+/** 批量删除的输入:ids 优先,其次 filter;只有显式 all=true 才会删除全部 */
+export interface TagDeleteInput {
+  ids?: string[]
+  filter?: TagBatchFilter
+  all?: boolean
+}
+
+/** 批量删除的结果 */
+export interface TagDeleteResult {
+  affected: number
 }
 
 /** 创建/更新标签凭据的输入 */

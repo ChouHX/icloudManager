@@ -7,6 +7,7 @@ import LoginPage from './pages/LoginPage'
 import AliasesPage from './pages/AliasesPage'
 import InboxPage from './pages/InboxPage'
 import AccountsPage from './pages/AccountsPage'
+import DashboardPage from './pages/DashboardPage'
 import PublicInboxPage from './pages/PublicInboxPage'
 import TagsPage from './pages/TagsPage'
 
@@ -48,6 +49,7 @@ export default function App() {
           <Route path="/" element={<RootEntry />} />
           <Route path="/login" element={<LoginPage />} />
           <Route element={<ProtectedLayout />}>
+            <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/aliases" element={<AliasesPage />} />
             <Route path="/inbox" element={<InboxPage />} />
             <Route path="/accounts" element={<AccountsPage />} />

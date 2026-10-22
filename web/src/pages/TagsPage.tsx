@@ -38,6 +38,7 @@ import { formatDateTime } from '../utils/format'
 import {
   TagBackupModal,
   TagBatchModal,
+  TagDeleteModal,
   TagExportModal,
   TagImportModal,
   TagManageModal,
@@ -212,6 +213,7 @@ export default function TagsPage() {
   const [dateRange, setDateRange] = useState<[Dayjs | null, Dayjs | null] | null>(null)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [exportOpen, setExportOpen] = useState(false)
+  const [deleteOpen, setDeleteOpen] = useState(false)
 
   // 输入防抖,避免每敲一个字符都请求服务端
   useEffect(() => {
@@ -425,6 +427,14 @@ export default function TagsPage() {
           >
             批量导出
           </Button>
+          <Button
+            danger
+            icon={<DeleteOutlined />}
+            onClick={() => setDeleteOpen(true)}
+            disabled={stats.total === 0}
+          >
+            批量删除
+          </Button>
           <Button icon={<TagsOutlined />} onClick={() => setManageOpen(true)}>
             标签管理
           </Button>
@@ -585,6 +595,22 @@ export default function TagsPage() {
           filter={batchFilter}
           filterActive={hasFilters}
           onClose={() => setExportOpen(false)}
+        />
+      )}
+
+      {deleteOpen && (
+        <TagDeleteModal
+          open
+          filteredCount={data?.count ?? 0}
+          totalCount={stats.total}
+          selectedIds={selectedIds}
+          filter={batchFilter}
+          filterActive={hasFilters}
+          onClose={() => setDeleteOpen(false)}
+          onDone={() => {
+            reload()
+            setSelectedIds([])
+          }}
         />
       )}
 

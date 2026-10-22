@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ApiError, request } from './client'
-import type { AccountSummary, TagListResult } from './types'
+import type { AccountSummary, DashboardData, TagListResult } from './types'
 
 export function describeError(err: unknown): string {
   return err instanceof ApiError ? err.message : '网络连接失败，请检查服务状态'
@@ -99,4 +99,14 @@ export function useTags(query = ''): {
   reload: () => void
 } {
   return useFetch<TagListResult>(`/api/tags${query}`)
+}
+
+/** 数据看板:iCloud 账号别名与标签凭据分布 */
+export function useDashboard(): {
+  data: DashboardData | null
+  loading: boolean
+  error: string
+  reload: () => void
+} {
+  return useFetch<DashboardData>('/api/dashboard')
 }

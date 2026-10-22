@@ -139,6 +139,34 @@ func TestStatsAndTagCounts(t *testing.T) {
 	}
 }
 
+func TestSiteCounts(t *testing.T) {
+	s := newTestStore(t)
+	for _, in := range []Input{
+		{Email: "a@example.com", Site: "GitHub"},
+		{Email: "b@example.com", Site: "github"},
+		{Email: "c@example.com", Site: "Steam"},
+		{Email: "d@example.com"},
+	} {
+		if _, err := s.Create(in); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	counts, err := s.SiteCounts()
+	if err != nil {
+		t.Fatalf("SiteCounts: %v", err)
+	}
+	if len(counts) != 2 {
+		t.Fatalf("网站应去重,得到 %+v", counts)
+	}
+	if counts[0].Site != "GitHub" || counts[0].Count != 2 {
+		t.Fatalf("GitHub 统计不符: %+v", counts[0])
+	}
+	if counts[1].Site != "Steam" || counts[1].Count != 1 {
+		t.Fatalf("Steam 统计不符: %+v", counts[1])
+	}
+}
+
 func TestMigratesLegacyJSON(t *testing.T) {
 	dir := t.TempDir()
 	legacy := map[string]any{

@@ -25,6 +25,16 @@ type BatchResult struct {
 	Tags     []string `json:"tags"`
 }
 
+// DeleteQuery 定义批量删除范围。
+//
+// IDs 非空时按记录 ID 删除;否则 Filter 有筛选条件时按筛选删除;
+// 只有显式 All=true 时才会删除全部记录,避免空请求误删。
+type DeleteQuery struct {
+	IDs    []string
+	Filter ListQuery
+	All    bool
+}
+
 // BatchValidationError 表示批量操作参数不合法,handler 应返回 400。
 type BatchValidationError struct {
 	Message string
@@ -121,6 +131,85 @@ func (s *Store) BatchTag(in BatchInput) (BatchResult, error) {
 	}
 	s.hardenFiles()
 	return result, nil
+}
+
+// BatchDelete 按 ID、筛选条件或全部记录批量删除,返回实际删除的记录数。
+//
+// 删除记录时 entry_tags 会随外键级联删除,整个操作在同一事务内完成。
+func (s *Store) BatchDelete(in DeleteQuery) (int, error) {
+	ids := dedupeIDs(in.IDs)
+	if in.All && (len(ids) > 0 || in.Filter.hasFilter()) {
+		return 0, batchInvalid("all 不能与 ids 或 filter 同时使用")
+	}
+	if len(ids) == 0 && !in.Filter.hasFilter() && !in.All {
+		return 0, batchInvalid("请先筛选或勾选要删除的记录")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	affected := int64(0)
+	switch {
+	case len(ids) > 0:
+		ids, err = existingEntryIDs(tx, ids)
+		if err != nil {
+			return 0, err
+		}
+		for start := 0; start < len(ids); start += 500 {
+			end := start + 500
+			if end > len(ids) {
+				end = len(ids)
+			}
+			chunk := ids[start:end]
+			placeholders := strings.TrimSuffix(strings.Repeat("?,", len(chunk)), ",")
+			args := make([]any, len(chunk))
+			for i, id := range chunk {
+				args[i] = id
+			}
+			res, err := tx.Exec(`DELETE FROM entries WHERE id IN (`+placeholders+`)`, args...)
+			if err != nil {
+				return 0, err
+			}
+			n, err := res.RowsAffected()
+			if err != nil {
+				return 0, err
+			}
+			affected += n
+		}
+	case in.Filter.hasFilter():
+		where, args := buildWhere(in.Filter)
+		res, err := tx.Exec(`DELETE FROM entries WHERE id IN (SELECT e.id FROM entries e `+where+`)`, args...)
+		if err != nil {
+			return 0, err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return 0, err
+		}
+		affected = n
+	default:
+		res, err := tx.Exec(`DELETE FROM entries`)
+		if err != nil {
+			return 0, err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return 0, err
+		}
+		affected = n
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	s.hardenFiles()
+	return int(affected), nil
 }
 
 // dedupeIDs 去空白、去重并保持原顺序。

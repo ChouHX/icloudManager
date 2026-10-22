@@ -152,6 +152,9 @@ func (s *Server) register() {
 			authed.POST("/accounts/:id/check", csrfCheck(s.auth), s.checkAccountHandler)
 			authed.DELETE("/accounts/:id", csrfCheck(s.auth), s.removeAccountHandler)
 
+			// ===== 数据看板 =====
+			authed.GET("/dashboard", s.dashboardHandler)
+
 			// ===== 核心接口 1: 创建邮箱 =====
 			authed.POST("/create", csrfCheck(s.auth), s.createAliasHandler)
 
@@ -182,6 +185,7 @@ func (s *Server) register() {
 			authed.POST("/tags", csrfCheck(s.auth), s.createTagHandler)
 			authed.POST("/tags/import", csrfCheck(s.auth), s.importTagsHandler)
 			authed.POST("/tags/batch", csrfCheck(s.auth), s.batchTagsHandler)
+			authed.POST("/tags/batch-delete", csrfCheck(s.auth), s.batchDeleteTagsHandler)
 			authed.POST("/tags/restore", csrfCheck(s.auth), s.restoreTagsHandler)
 			authed.PUT("/tags/:id", csrfCheck(s.auth), s.updateTagHandler)
 			authed.DELETE("/tags/:id", csrfCheck(s.auth), s.deleteTagHandler)

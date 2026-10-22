@@ -142,6 +142,24 @@ function filterTagEntries(query: {
   })
 }
 
+/** 判断筛选条件是否包含任何有效字段(与后端 ListQuery.hasFilter 对应) */
+function hasTagFilter(filter?: {
+  search?: string
+  tags?: string[]
+  site?: string
+  created_from?: string
+  created_to?: string
+}) {
+  return Boolean(
+    filter &&
+      ((filter.search ?? '').trim() ||
+        (filter.site ?? '').trim() ||
+        (filter.created_from ?? '').trim() ||
+        (filter.created_to ?? '').trim() ||
+        (filter.tags ?? []).some((tag) => tag.trim() !== '')),
+  )
+}
+
 export const handlers = [
   http.post('/api/auth/login', () =>
     HttpResponse.json({ success: true, data: { csrf_token: 'csrf-token', expires_at: '2026-08-05T22:00:00+08:00' } }),
@@ -151,6 +169,35 @@ export const handlers = [
   ),
   http.post('/api/auth/logout', () => HttpResponse.json({ success: true, data: { logged_out: true } })),
   http.get('/api/accounts', () => HttpResponse.json({ success: true, data: [ACCOUNT] })),
+  http.get('/api/dashboard', () =>
+    HttpResponse.json({
+      success: true,
+      data: {
+        accounts: {
+          total: 1,
+          alias_total: ACCOUNT.alias_total,
+          alias_active: ACCOUNT.alias_active,
+          items: [ACCOUNT],
+        },
+        tags: {
+          total: TAG_ENTRIES.length,
+          tagged: TAG_ENTRIES.filter((entry) => (entry.tags ?? []).length > 0).length,
+          untagged: TAG_ENTRIES.filter((entry) => (entry.tags ?? []).length === 0).length,
+          tag_kinds: 3,
+          site_kinds: 2,
+          by_site: [
+            { site: 'GitHub', count: 1 },
+            { site: 'Steam', count: 1 },
+          ],
+          by_tag: [
+            { tag: '开发', count: 1 },
+            { tag: '游戏', count: 1 },
+            { tag: '项目A', count: 1 },
+          ],
+        },
+      },
+    }),
+  ),
   http.get('/api/tags', ({ request }) => {
     const url = new URL(request.url)
     const page = Math.max(1, Number(url.searchParams.get('page') ?? '1') || 1)
@@ -213,6 +260,32 @@ export const handlers = [
       success: true,
       data: { affected, action: body.action ?? 'add', tags: body.tags },
     })
+  }),
+
+  http.post('/api/tags/batch-delete', async ({ request }) => {
+    const body = (await request.json()) as {
+      ids?: string[]
+      filter?: {
+        search?: string
+        tags?: string[]
+        site?: string
+        created_from?: string
+        created_to?: string
+      }
+      all?: boolean
+    }
+    if (!body.all && !(body.ids ?? []).length && !hasTagFilter(body.filter)) {
+      return HttpResponse.json(
+        { success: false, code: 'VALIDATION_ERROR', message: '请先筛选或勾选要删除的记录' },
+        { status: 400 },
+      )
+    }
+    const affected = body.all
+      ? TAG_ENTRIES.length
+      : (body.ids ?? []).length > 0
+        ? TAG_ENTRIES.filter((entry) => (body.ids ?? []).includes(entry.id)).length
+        : filterTagEntries(body.filter ?? {}).length
+    return HttpResponse.json({ success: true, data: { affected } })
   }),
 
   http.post('/api/tags', () =>

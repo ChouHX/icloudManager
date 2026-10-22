@@ -307,4 +307,50 @@ describe('TagsPage', { timeout: 30000 }, () => {
       clickSpy.mockRestore()
     }
   })
+
+  it('批量删除支持勾选、筛选与全部记录', async () => {
+    const user = userEvent.setup()
+    renderTags()
+    await screen.findByText('user@example.com')
+
+    // 多选删除：只删除勾选记录
+    const email = screen.getByText('user@example.com')
+    await user.click(within(email.closest('tr')!).getByRole('checkbox'))
+    await user.click(screen.getByRole('button', { name: /批量删除/ }))
+    let dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText('已勾选的记录（1 条）')).toBeInTheDocument()
+    await user.click(within(dialog).getByRole('button', { name: /删\s*除/ }))
+    expect(await screen.findByText('已删除 1 条记录')).toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+
+    // 按筛选删除
+    const toolbar = document.querySelector('.list-toolbar') as HTMLElement
+    const siteSelect = toolbar.querySelectorAll('.ant-select')[1] as HTMLElement
+    await user.click(within(siteSelect).getByRole('combobox'))
+    await user.click(await screen.findByTitle('GitHub'))
+    await waitFor(() => expect(screen.queryByText('gamer@example.com')).not.toBeInTheDocument())
+
+    await user.click(screen.getByRole('button', { name: /批量删除/ }))
+    dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText('当前筛选结果（1 条）')).toBeInTheDocument()
+    await user.click(within(dialog).getByRole('button', { name: /删\s*除/ }))
+    expect(await screen.findByText('已删除 1 条记录')).toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+
+    // 清空筛选后删除全部，需输入确认文本
+    await user.click(siteSelect.querySelector('.ant-select-clear') as HTMLElement)
+    await waitFor(() => expect(screen.getByText('gamer@example.com')).toBeInTheDocument())
+
+    await user.click(screen.getByRole('button', { name: /批量删除/ }))
+    dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText('全部记录（2 条）')).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: /删\s*除/ })).toBeDisabled()
+
+    await user.type(within(dialog).getByLabelText('输入 删除全部 以确认'), '删除全部')
+    await waitFor(() =>
+      expect(within(dialog).getByRole('button', { name: /删\s*除/ })).toBeEnabled(),
+    )
+    await user.click(within(dialog).getByRole('button', { name: /删\s*除/ }))
+    expect(await screen.findByText('已删除 2 条记录')).toBeInTheDocument()
+  })
 })

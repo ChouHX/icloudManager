@@ -79,6 +79,12 @@ type TagUsage struct {
 	Count int    `json:"count"`
 }
 
+// SiteUsage 是一个网站及其使用记录数。
+type SiteUsage struct {
+	Site  string `json:"site"`
+	Count int    `json:"count"`
+}
+
 // ListQuery 是分页/批量操作共用的筛选条件。
 type ListQuery struct {
 	Page     int
@@ -480,6 +486,31 @@ func (s *Store) TagCounts() ([]TagUsage, error) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Tag < out[j].Tag })
 	return out, nil
+}
+
+// SiteCounts 返回每个网站及其使用记录数,按记录数降序、网站名升序排列。
+func (s *Store) SiteCounts() ([]SiteUsage, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	rows, err := s.db.Query(`SELECT MIN(site) AS site, COUNT(*) AS usage
+		FROM entries WHERE site <> ''
+		GROUP BY lower(site)
+		ORDER BY usage DESC, lower(site) ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := make([]SiteUsage, 0)
+	for rows.Next() {
+		var usage SiteUsage
+		if err := rows.Scan(&usage.Site, &usage.Count); err != nil {
+			return nil, err
+		}
+		out = append(out, usage)
+	}
+	return out, rows.Err()
 }
 
 // Stats 返回标签账号的汇总统计。
