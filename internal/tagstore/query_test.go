@@ -230,6 +230,100 @@ func TestSiteTagCounts(t *testing.T) {
 	}
 }
 
+func TestMultipleSitesPerEntry(t *testing.T) {
+	s := newTestStore(t)
+	entry, err := s.Create(Input{
+		Email: "a@example.com",
+		Sites: []string{"GitHub", "Steam", "GitHub"},
+		Tags:  []string{"项目A"},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if len(entry.Sites) != 2 || entry.Sites[0] != "GitHub" || entry.Sites[1] != "Steam" {
+		t.Fatalf("网站应去重保序: %+v", entry.Sites)
+	}
+	if entry.Site != "GitHub" {
+		t.Fatalf("主网站应为第一个: %q", entry.Site)
+	}
+
+	// 按任一网站筛选都能命中同一条记录
+	for _, site := range []string{"github", "STEAM"} {
+		res, err := s.ListPage(ListQuery{Site: site})
+		if err != nil {
+			t.Fatalf("ListPage(%s): %v", site, err)
+		}
+		if res.Total != 1 {
+			t.Fatalf("按网站 %s 筛选应命中 1 条,得到 %d", site, res.Total)
+		}
+	}
+
+	// 两个网站各计一次
+	counts, err := s.SiteCounts()
+	if err != nil {
+		t.Fatalf("SiteCounts: %v", err)
+	}
+	if len(counts) != 2 || counts[0].Count != 1 || counts[1].Count != 1 {
+		t.Fatalf("网站统计不符: %+v", counts)
+	}
+
+	// 更新时整体替换网站列表
+	updated, err := s.Update(entry.ID, Input{Email: "a@example.com", Sites: []string{"Google"}})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if len(updated.Sites) != 1 || updated.Sites[0] != "Google" {
+		t.Fatalf("网站应被替换: %+v", updated.Sites)
+	}
+}
+
+func TestMergeDuplicateEmailsOnStartup(t *testing.T) {
+	dir := t.TempDir()
+	s, err := NewStore(dir)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	// 模拟旧版数据:同一邮箱在不同网站各有一条记录。
+	for i, site := range []string{"GitHub", "Steam"} {
+		id := newEntryID()
+		if _, err := s.db.Exec(`INSERT INTO entries(id, email, password, site, note, created_at, updated_at)
+			VALUES(?, 'a@example.com', 'p', ?, '', ?, ?)`,
+			id, site, "2026-01-0"+fmt.Sprint(i+1)+"T00:00:00Z", "2026-01-0"+fmt.Sprint(i+1)+"T00:00:00Z"); err != nil {
+			t.Fatalf("插入旧数据: %v", err)
+		}
+		if _, err := s.db.Exec(`INSERT INTO entry_sites(entry_id, site, site_lower, ord)
+			VALUES(?, ?, lower(?), 0)`, id, site, site); err != nil {
+			t.Fatalf("插入旧网站: %v", err)
+		}
+		if _, err := s.db.Exec(`INSERT INTO entry_tags(entry_id, tag, tag_lower, ord)
+			VALUES(?, ?, lower(?), 0)`, id, "标签"+fmt.Sprint(i+1), "标签"+fmt.Sprint(i+1)); err != nil {
+			t.Fatalf("插入旧标签: %v", err)
+		}
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// 重新打开时自动合并。
+	reopened, err := NewStore(dir)
+	if err != nil {
+		t.Fatalf("重新打开: %v", err)
+	}
+	t.Cleanup(func() { _ = reopened.Close() })
+
+	entries := reopened.List()
+	if len(entries) != 1 {
+		t.Fatalf("同一邮箱应合并为一条记录,得到 %d 条", len(entries))
+	}
+	got := entries[0]
+	if len(got.Sites) != 2 || got.Sites[0] != "GitHub" || got.Sites[1] != "Steam" {
+		t.Fatalf("网站应取并集: %+v", got.Sites)
+	}
+	if len(got.Tags) != 2 {
+		t.Fatalf("标签应取并集: %+v", got.Tags)
+	}
+}
+
 func TestMigratesLegacyJSON(t *testing.T) {
 	dir := t.TempDir()
 	legacy := map[string]any{

@@ -137,6 +137,7 @@ export function TagImportModal({
               <Space size={16} wrap>
                 <span>新增 <strong>{result.imported}</strong></span>
                 <span>更新 <strong>{result.updated}</strong></span>
+                <span>追加网站 <strong>{result.sites_appended ?? 0}</strong></span>
                 <span>跳过 <strong>{result.skipped}</strong></span>
                 <span>无效 <strong>{result.invalid}</strong></span>
               </Space>
@@ -186,8 +187,8 @@ export function TagImportModal({
               maxTagCount="responsive"
             />
           </Form.Item>
-          <Form.Item name="site" label="默认网站" extra="行内未指定网站时使用，例如 GitHub">
-            <Input placeholder="可留空" maxLength={100} />
+          <Form.Item name="site" label="默认网站" extra="行内未指定网站时使用。同一邮箱已存在时会自动追加网站，不会新建记录">
+            <Input placeholder="可留空，例如 GitHub" maxLength={100} />
           </Form.Item>
           <Form.Item
             name="separator"

@@ -32,8 +32,10 @@ type ImportResult struct {
 	Updated  int      `json:"updated"`
 	Skipped  int      `json:"skipped"`
 	Invalid  int      `json:"invalid"`
-	Entries  []Entry  `json:"entries,omitempty"`
-	Errors   []string `json:"errors"`
+	// SitesAppended 是本次追加到已有邮箱上的网站数量。
+	SitesAppended int     `json:"sites_appended"`
+	Entries       []Entry `json:"entries,omitempty"`
+	Errors        []string `json:"errors"`
 }
 
 // maxImportErrors 限制返回的行级错误数量,避免响应过大。
@@ -48,8 +50,12 @@ type importLine struct {
 
 // Import 批量导入记录,并把 in.Tags 应用到每一条记录。
 //
-// 解析与校验失败的行走 Invalid 计数;邮箱+网站已存在时按 Mode 跳过或更新。
-// 所有写入在同一个事务内完成,任一步失败都会整体回滚。
+// 以「邮箱」为唯一键:
+//   - 邮箱不存在 → 新建记录(Imported++)
+//   - 邮箱已存在 → 把本行的网站追加到该邮箱的网站列表、合并标签(Updated++);
+//     密码仅在 Mode=update 时覆盖;若网站/标签/密码都没有变化则计入 Skipped
+//
+// 解析与校验失败的行走 Invalid 计数。所有写入在同一个事务内完成,任一步失败都会整体回滚。
 func (s *Store) Import(in ImportInput) (ImportResult, error) {
 	tags, err := normalizeTags(in.Tags)
 	if err != nil {
@@ -84,8 +90,9 @@ func (s *Store) Import(in ImportInput) (ImportResult, error) {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	find, err := tx.Prepare(`SELECT id, created_at FROM entries
-		WHERE lower(email) = ? AND lower(site) = ? LIMIT 1`)
+	// 同一邮箱只保留一条记录,因此按邮箱查重。
+	find, err := tx.Prepare(`SELECT id, password, created_at FROM entries
+		WHERE lower(email) = ? LIMIT 1`)
 	if err != nil {
 		return ImportResult{}, err
 	}
@@ -108,7 +115,7 @@ func (s *Store) Import(in ImportInput) (ImportResult, error) {
 		if site == "" {
 			site = defaultSite
 		}
-		email, password, site, _, _, err := normalize(Input{
+		email, password, lineSites, _, _, err := normalize(Input{
 			Email:    line.email,
 			Password: line.password,
 			Site:     site,
@@ -119,32 +126,53 @@ func (s *Store) Import(in ImportInput) (ImportResult, error) {
 			continue
 		}
 
-		var existingID, createdAt string
-		err = find.QueryRow(strings.ToLower(email), strings.ToLower(site)).Scan(&existingID, &createdAt)
+		var existingID, existingPassword, createdAt string
+		err = find.QueryRow(strings.ToLower(email)).Scan(&existingID, &existingPassword, &createdAt)
 		switch {
 		case err == nil:
-			if mode != "update" {
-				result.Skipped++
-				continue
+			existingSites, err := loadSites(tx, existingID)
+			if err != nil {
+				return ImportResult{}, err
 			}
 			existingTags, err := loadTags(tx, existingID)
 			if err != nil {
 				return ImportResult{}, err
 			}
-			merged := mergeTags(existingTags, tags)
-			if _, err := update.Exec(password, site, now, existingID); err != nil {
+
+			mergedSites := mergeSites(existingSites, lineSites)
+			mergedTags := mergeTags(existingTags, tags)
+			appended := len(mergedSites) - len(existingSites)
+
+			// 只有 update 模式才覆盖密码,且不接受空密码清空已有值。
+			nextPassword := existingPassword
+			passwordChanged := false
+			if mode == "update" && password != "" && password != existingPassword {
+				nextPassword = password
+				passwordChanged = true
+			}
+
+			if appended == 0 && !passwordChanged && len(mergedTags) == len(existingTags) {
+				result.Skipped++
+				continue
+			}
+			if _, err := update.Exec(nextPassword, primarySite(mergedSites), now, existingID); err != nil {
 				return ImportResult{}, err
 			}
-			if err := replaceTagsTx(tx, existingID, merged); err != nil {
+			if err := replaceSitesTx(tx, existingID, mergedSites); err != nil {
+				return ImportResult{}, err
+			}
+			if err := replaceTagsTx(tx, existingID, mergedTags); err != nil {
 				return ImportResult{}, err
 			}
 			result.Updated++
+			result.SitesAppended += appended
 			result.Entries = append(result.Entries, Entry{
 				ID:        existingID,
 				Email:     email,
-				Password:  password,
-				Site:      site,
-				Tags:      merged,
+				Password:  nextPassword,
+				Site:      primarySite(mergedSites),
+				Sites:     mergedSites,
+				Tags:      mergedTags,
 				CreatedAt: createdAt,
 				UpdatedAt: now,
 			})
@@ -157,12 +185,16 @@ func (s *Store) Import(in ImportInput) (ImportResult, error) {
 			ID:        newEntryID(),
 			Email:     email,
 			Password:  password,
-			Site:      site,
+			Site:      primarySite(lineSites),
+			Sites:     cloneSites(lineSites),
 			Tags:      cloneTags(tags),
 			CreatedAt: now,
 			UpdatedAt: now,
 		}
 		if _, err := insert.Exec(entry.ID, entry.Email, entry.Password, entry.Site, entry.CreatedAt, entry.UpdatedAt); err != nil {
+			return ImportResult{}, err
+		}
+		if err := insertSites(tx, entry.ID, entry.Sites); err != nil {
 			return ImportResult{}, err
 		}
 		if err := insertTags(tx, entry.ID, entry.Tags); err != nil {

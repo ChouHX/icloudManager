@@ -41,11 +41,12 @@ export function entriesToCSV(entries: TagEntry[]): string {
   const header = ['邮箱', '密码', '网站', '项目标签', '备注', '创建时间', '更新时间']
   const lines = [header.map(csvCell).join(',')]
   for (const entry of entries) {
+    const sites = entry.sites?.length ? entry.sites : entry.site ? [entry.site] : []
     lines.push(
       [
         entry.email,
         entry.password ?? '',
-        entry.site ?? '',
+        sites.join('、'),
         (entry.tags ?? []).join('、'),
         entry.note ?? '',
         entry.created_at ?? '',

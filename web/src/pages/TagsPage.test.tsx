@@ -60,6 +60,16 @@ describe('TagsPage', { timeout: 30000 }, () => {
     expect(await screen.findByText('s3cret-pass')).toBeInTheDocument()
   })
 
+  it('同一邮箱展示多个网站', async () => {
+    renderTags()
+
+    const email = await screen.findByText('user@example.com')
+    const row = within(email.closest('tr')!)
+    // 一个邮箱可以关联多个网站，全部以标签形式展示
+    expect(row.getByText('GitHub')).toBeInTheDocument()
+    expect(row.getByText('Steam')).toBeInTheDocument()
+  })
+
   it('打开添加记录弹窗并提交', async () => {
     const user = userEvent.setup()
     renderTags()

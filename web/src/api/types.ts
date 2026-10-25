@@ -129,8 +129,10 @@ export interface TagEntry {
   id: string
   email: string
   password?: string
-  /** 网站/服务名称，如 GitHub、Steam */
+  /** 主网站（等于 sites[0]），兼容旧接口 */
   site?: string
+  /** 该邮箱用过的所有网站/服务，如 GitHub、Steam */
+  sites: string[]
   /** 使用过该账号的项目标签 */
   tags: string[]
   note?: string
@@ -260,7 +262,8 @@ export interface TagDeleteResult {
 export interface TagEntryInput {
   email: string
   password: string
-  site: string
+  /** 该邮箱用过的所有网站；后端也兼容只传 site */
+  sites: string[]
   tags: string[]
   note: string
 }
@@ -285,6 +288,8 @@ export interface TagImportResult {
   updated: number
   skipped: number
   invalid: number
+  /** 追加到已有邮箱上的网站数量 */
+  sites_appended: number
   entries?: TagEntry[]
   errors: string[]
 }

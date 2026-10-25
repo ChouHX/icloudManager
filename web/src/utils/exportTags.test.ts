@@ -10,6 +10,7 @@ describe('entriesToCSV', () => {
         email: 'user@example.com',
         password: 'p"1',
         site: 'GitHub',
+        sites: ['GitHub', 'Steam'],
         tags: ['项目A', '开发'],
         note: '第一行\n第二行',
         created_at: '2026-08-01T09:00:00+08:00',
@@ -23,6 +24,8 @@ describe('entriesToCSV', () => {
     expect(lines[0]).toBe('"邮箱","密码","网站","项目标签","备注","创建时间","更新时间"')
     expect(lines[1]).toContain('"user@example.com"')
     expect(lines[1]).toContain('"p""1"')
+    // 多个网站用顿号连接
+    expect(lines[1]).toContain('"GitHub、Steam"')
     expect(lines[1]).toContain('"项目A、开发"')
     expect(csv).toContain('"第一行\n第二行"')
   })

@@ -92,6 +92,7 @@ export const TAG_ENTRIES = [
     email: 'user@example.com',
     password: 's3cret-pass',
     site: 'GitHub',
+    sites: ['GitHub', 'Steam'],
     tags: ['项目A', '开发'],
     note: '公司项目',
     created_at: '2026-08-01T09:00:00+08:00',
@@ -102,6 +103,7 @@ export const TAG_ENTRIES = [
     email: 'gamer@example.com',
     password: 'game-pass',
     site: 'Steam',
+    sites: ['Steam'],
     tags: ['游戏'],
     note: '',
     created_at: '2026-08-03T09:00:00+08:00',
@@ -125,7 +127,8 @@ function filterTagEntries(query: {
 
   return TAG_ENTRIES.filter((entry) => {
     const entryTags = (entry.tags ?? []).map((tag) => tag.toLowerCase())
-    if (site && (entry.site ?? '').toLowerCase() !== site) return false
+    const entrySites = (entry.sites ?? (entry.site ? [entry.site] : [])).map((site) => site.toLowerCase())
+    if (site && !entrySites.includes(site)) return false
     if (filters.length > 0 && !entryTags.some((tag) => filters.includes(tag))) return false
     if (from !== null || to !== null) {
       const created = new Date(entry.created_at).getTime()
@@ -135,7 +138,7 @@ function filterTagEntries(query: {
     if (!search) return true
     return (
       entry.email.toLowerCase().includes(search) ||
-      (entry.site ?? '').toLowerCase().includes(search) ||
+      entrySites.some((item) => item.includes(search)) ||
       (entry.note ?? '').toLowerCase().includes(search) ||
       entryTags.some((tag) => tag.includes(search))
     )
@@ -328,6 +331,7 @@ export const handlers = [
         updated: 0,
         skipped: 1,
         invalid: 1,
+        sites_appended: 0,
         entries: TAG_ENTRIES,
         errors: ['第 4 行: 邮箱格式不正确'],
       },

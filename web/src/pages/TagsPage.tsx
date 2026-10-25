@@ -76,7 +76,7 @@ function PasswordCell({ password }: { password?: string }) {
 interface TagFormValues {
   email: string
   password?: string
-  site?: string
+  sites?: string[]
   tags?: string[]
   note?: string
 }
@@ -86,12 +86,14 @@ function TagFormModal({
   open,
   editing,
   tagOptions,
+  siteOptions,
   onClose,
   onSaved,
 }: {
   open: boolean
   editing: TagEntry | null
   tagOptions: string[]
+  siteOptions: string[]
   onClose: () => void
   onSaved: () => void
 }) {
@@ -103,11 +105,11 @@ function TagFormModal({
     ? {
         email: editing.email,
         password: editing.password ?? '',
-        site: editing.site ?? '',
+        sites: editing.sites ?? (editing.site ? [editing.site] : []),
         tags: editing.tags ?? [],
         note: editing.note ?? '',
       }
-    : { email: '', password: '', site: '', tags: [], note: '' }
+    : { email: '', password: '', sites: [], tags: [], note: '' }
 
   async function handleOk() {
     let values: TagFormValues
@@ -119,7 +121,7 @@ function TagFormModal({
     const body: TagEntryInput = {
       email: values.email.trim(),
       password: values.password ?? '',
-      site: (values.site ?? '').trim(),
+      sites: (values.sites ?? []).map((site) => site.trim()).filter(Boolean),
       tags: values.tags ?? [],
       note: (values.note ?? '').trim(),
     }
@@ -175,8 +177,18 @@ function TagFormModal({
         <Form.Item name="password" label="网站密码">
           <Input.Password placeholder="留空表示暂不记录密码" autoComplete="new-password" />
         </Form.Item>
-        <Form.Item name="site" label="网站 / 服务" extra="例如 GitHub、Steam、某宝">
-          <Input placeholder="GitHub" maxLength={100} />
+        <Form.Item
+          name="sites"
+          label="网站 / 服务"
+          extra="一个邮箱可关联多个网站，输入后回车即可新增"
+        >
+          <Select
+            mode="tags"
+            placeholder="例如：GitHub、Steam"
+            options={siteOptions.map((site) => ({ value: site, label: site }))}
+            tokenSeparators={[',', '，']}
+            maxTagCount="responsive"
+          />
         </Form.Item>
         <Form.Item
           name="tags"
@@ -439,9 +451,21 @@ export default function TagsPage() {
     },
     {
       title: '网站 / 服务',
-      dataIndex: 'site',
-      width: 160,
-      render: (site?: string) => site || <Typography.Text type="secondary">—</Typography.Text>,
+      dataIndex: 'sites',
+      width: 200,
+      render: (sites: string[] | undefined, row: TagEntry) => {
+        // 兼容旧数据:只有单值 site
+        const list = sites && sites.length > 0 ? sites : row.site ? [row.site] : []
+        return list.length > 0 ? (
+          <Space size={4} wrap>
+            {list.map((site) => (
+              <Tag key={site}>{site}</Tag>
+            ))}
+          </Space>
+        ) : (
+          <Typography.Text type="secondary">—</Typography.Text>
+        )
+      },
     },
     {
       title: '密码',
@@ -689,6 +713,7 @@ export default function TagsPage() {
         open={formOpen}
         editing={editing}
         tagOptions={tagOptions}
+        siteOptions={siteOptions}
         onClose={() => setFormOpen(false)}
         onSaved={() => {
           message.success(editing ? '记录已更新' : '记录已添加')

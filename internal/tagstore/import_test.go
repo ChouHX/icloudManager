@@ -90,11 +90,17 @@ func TestRepairSiteNamesMergesDashResidue(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = s.Close() })
 	// 直接写入带残留连字符的历史数据,绕过 normalize 的输入校验。
+	// 同时写入 entry_sites(统计已改为读这张表)。
 	for _, site := range []string{"Lord", "-Lord", "--Lord", "---Lord", "Wimbledon"} {
+		id := newEntryID()
 		if _, err := s.db.Exec(`INSERT INTO entries(id, email, password, site, note, created_at, updated_at)
 			VALUES(?, ?, '', ?, '', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`,
-			newEntryID(), site+"@example.com", site); err != nil {
+			id, site+"@example.com", site); err != nil {
 			t.Fatalf("插入测试数据: %v", err)
+		}
+		if _, err := s.db.Exec(`INSERT INTO entry_sites(entry_id, site, site_lower, ord)
+			VALUES(?, ?, lower(?), 0)`, id, site, site); err != nil {
+			t.Fatalf("插入测试网站: %v", err)
 		}
 	}
 	if _, err := s.repairSiteNames(); err != nil {
@@ -204,10 +210,10 @@ func TestImportSkipAndUpdateDuplicates(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 默认 skip:重复项被跳过,已有记录不变
+	// 完全重复(邮箱 + 网站 + 标签都相同):默认 skip 模式跳过,已有记录不变
 	skipped, err := s.Import(ImportInput{
 		Text: "a@example.com----new----GitHub",
-		Tags: []string{"新标签"},
+		Tags: []string{"旧标签"},
 	})
 	if err != nil {
 		t.Fatalf("Import skip: %v", err)
@@ -219,7 +225,29 @@ func TestImportSkipAndUpdateDuplicates(t *testing.T) {
 		t.Fatalf("skip 不应修改已有记录: %+v", entry)
 	}
 
-	// update:覆盖密码并合并标签
+	// 同邮箱 + 新网站:把网站追加到该邮箱,并合并标签;skip 模式不覆盖密码
+	appended, err := s.Import(ImportInput{
+		Text: "a@example.com----newer----Steam",
+		Tags: []string{"新标签"},
+	})
+	if err != nil {
+		t.Fatalf("Import 追加网站: %v", err)
+	}
+	if appended.Updated != 1 || appended.Imported != 0 || appended.SitesAppended != 1 {
+		t.Fatalf("追加网站统计不符: %+v", appended)
+	}
+	entry := s.List()[0]
+	if len(entry.Sites) != 2 || entry.Sites[0] != "GitHub" || entry.Sites[1] != "Steam" {
+		t.Fatalf("网站应追加到同一邮箱: %+v", entry.Sites)
+	}
+	if entry.Password != "old" {
+		t.Fatalf("skip 模式不应覆盖密码: %+v", entry)
+	}
+	if len(entry.Tags) != 2 || entry.Tags[0] != "旧标签" || entry.Tags[1] != "新标签" {
+		t.Fatalf("标签应合并: %+v", entry.Tags)
+	}
+
+	// update:覆盖密码
 	updated, err := s.Import(ImportInput{
 		Text: "a@example.com----new----GitHub",
 		Tags: []string{"新标签"},
@@ -228,15 +256,45 @@ func TestImportSkipAndUpdateDuplicates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Import update: %v", err)
 	}
-	if updated.Updated != 1 || updated.Imported != 0 {
+	if updated.Updated != 1 || updated.Imported != 0 || updated.SitesAppended != 0 {
 		t.Fatalf("update 统计不符: %+v", updated)
 	}
-	entry := s.List()[0]
-	if entry.Password != "new" {
-		t.Fatalf("update 应覆盖密码: %+v", entry)
+	if got := s.List()[0]; got.Password != "new" || len(got.Sites) != 2 {
+		t.Fatalf("update 应覆盖密码且保留网站: %+v", got)
 	}
-	if len(entry.Tags) != 2 || entry.Tags[0] != "旧标签" || entry.Tags[1] != "新标签" {
-		t.Fatalf("update 应合并标签: %+v", entry.Tags)
+}
+
+func TestImportSameEmailDifferentSitesMergesIntoOneRecord(t *testing.T) {
+	s := newTestStore(t)
+	// 分两次、按单个网站导入:第二次应追加到同一邮箱而不是新建记录。
+	if _, err := s.Import(ImportInput{
+		Text: "a@example.com----p1",
+		Site: "网站1",
+		Tags: []string{"标签1"},
+	}); err != nil {
+		t.Fatalf("第一次导入: %v", err)
+	}
+	res, err := s.Import(ImportInput{
+		Text: "a@example.com----p1",
+		Site: "网站2",
+		Tags: []string{"标签2"},
+	})
+	if err != nil {
+		t.Fatalf("第二次导入: %v", err)
+	}
+	if res.Imported != 0 || res.Updated != 1 || res.SitesAppended != 1 {
+		t.Fatalf("第二次导入应追加网站: %+v", res)
+	}
+
+	entries := s.List()
+	if len(entries) != 1 {
+		t.Fatalf("同一邮箱应只有一条记录,得到 %d 条", len(entries))
+	}
+	if got := entries[0].Sites; len(got) != 2 || got[0] != "网站1" || got[1] != "网站2" {
+		t.Fatalf("网站列表不符: %+v", got)
+	}
+	if len(entries[0].Tags) != 2 {
+		t.Fatalf("标签应合并: %+v", entries[0].Tags)
 	}
 }
 

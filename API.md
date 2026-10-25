@@ -729,6 +729,7 @@ GET /api/tags?page=1&page_size=20&search=github&tags=项目A,游戏&site=GitHub&
         "email": "user@example.com",
         "password": "p@ssw0rd",
         "site": "GitHub",
+        "sites": ["GitHub", "Steam"],
         "tags": ["项目A", "开发"],
         "note": "公司项目",
         "created_at": "2026-08-01T09:00:00+08:00",
@@ -744,6 +745,8 @@ GET /api/tags?page=1&page_size=20&search=github&tags=项目A,游戏&site=GitHub&
 - `sites` 是全部记录中出现过的去重网站名，可直接用于网站筛选下拉框。
 - `tag_counts` 是每个标签的使用记录数（覆盖全部分页），供标签管理弹窗使用。
 - `stats` 是页面顶部统计卡片数据：记录总数、标签数、网站数、未打标签的记录数。
+- **一个邮箱对应一条记录**，`sites` 是该邮箱用过的全部网站；`site` 只是 `sites[0]`（主网站），
+  为兼容旧客户端保留。
 
 **新增记录**
 
@@ -751,10 +754,12 @@ GET /api/tags?page=1&page_size=20&search=github&tags=项目A,游戏&site=GitHub&
 POST /api/tags
 X-CSRF-Token: <token>
 
-{ "email": "user@example.com", "password": "p@ssw0rd", "site": "GitHub", "tags": ["项目A"], "note": "" }
+{ "email": "user@example.com", "password": "p@ssw0rd", "sites": ["GitHub", "Steam"], "tags": ["项目A"], "note": "" }
 ```
 
-`email` 必填且需为合法邮箱；`password`、`site`、`tags`、`note` 可选。
+`email` 必填且需为合法邮箱；`password`、`sites`、`tags`、`note` 可选。
+`sites` 会自动去空白、忽略大小写去重，最多 50 个、每个最长 100 字符；
+只传单个字符串的 `site` 也兼容（等价于 `sites: ["..."]`）。
 `tags` 会自动去空白、忽略大小写去重，最多 20 个、每个最长 32 字符。
 成功返回创建后的记录对象。
 
@@ -882,17 +887,26 @@ X-CSRF-Token: <token>
 
 空行与以 `#` 开头的行会被忽略。字段两端成对的引号、`<...>` 会被自动去除。
 `tags` 会应用到本次导入的**所有**记录（去空白、忽略大小写去重）；
-`site` 是行内未指定网站时的默认值；`mode` 为 `skip`（默认，跳过已存在的「邮箱 + 网站」）
-或 `update`（覆盖密码并合并标签）。`password`、`site` 可留空。
+`site` 是行内未指定网站时的默认值；`password`、`site` 可留空。
+
+**导入以「邮箱」为唯一键**，所以可以按单个网站分批导入：
+
+| 情况 | 结果 |
+| --- | --- |
+| 邮箱不存在 | 新建记录，`imported + 1` |
+| 邮箱已存在，本行带来新网站 | 网站**追加**到该邮箱的 `sites`，标签取并集，`updated + 1`、`sites_appended + 1` |
+| 邮箱已存在，且网站/标签都没变化 | `skipped + 1` |
+| 密码不同 | 仅 `mode=update` 时覆盖；`skip` 模式下不动密码 |
 
 ```json
 {
   "success": true,
   "data": {
     "imported": 2,
-    "updated": 0,
+    "updated": 1,
     "skipped": 1,
     "invalid": 1,
+    "sites_appended": 1,
     "errors": ["第 4 行: 邮箱地址格式无效"]
   }
 }
@@ -1001,7 +1015,7 @@ X-CSRF-Token: <token>
 }
 ```
 
-`mode` 为 `merge`（默认，跳过已存在的「邮箱 + 网站」）或 `replace`（先清空再重建）。
+`mode` 为 `merge`（默认，跳过已存在的邮箱）或 `replace`（先清空再重建）。
 导入会重新校验每条记录并忽略备份内重复项，保留备份中的创建/更新时间；
 记录 ID 缺失或冲突时会重新生成。请求体兼容三种形态：备份对象、
 `{ success, data }` API 响应包裹，或纯记录数组。

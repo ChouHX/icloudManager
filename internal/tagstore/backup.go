@@ -29,7 +29,7 @@ type RestoreInput struct {
 	Version int     `json:"version"`
 	Type    string  `json:"type"`
 	Entries []Entry `json:"entries"`
-	// Mode 为 merge(默认,跳过已存在的「邮箱+网站」)或 replace(清空后重建)。
+	// Mode 为 merge(默认,跳过已存在的邮箱)或 replace(清空后重建)。
 	Mode string `json:"mode"`
 }
 
@@ -113,10 +113,16 @@ func (s *Store) ExportQuery(in ExportQuery) (Backup, error) {
 	if err != nil {
 		return Backup{}, err
 	}
+	sites, err := s.sitesForIDs(entryIDs)
+	if err != nil {
+		return Backup{}, err
+	}
 	for i := range entries {
 		if list, ok := tags[entries[i].ID]; ok {
 			entries[i].Tags = list
 		}
+		entries[i].Sites = cloneSites(sites[entries[i].ID])
+		entries[i].Site = primarySite(entries[i].Sites)
 	}
 	return Backup{
 		Version:    backupVersion,
@@ -142,8 +148,8 @@ func scanExportRows(rows *sql.Rows) ([]Entry, error) {
 
 // Restore 从备份导入记录。
 //
-// mode 为 merge(默认,跳过已存在的「邮箱+网站」)或 replace(清空后重建);
-// 备份内重复的「邮箱+网站」会被去重。所有写入在同一事务内完成。
+// mode 为 merge(默认,跳过已存在的邮箱)或 replace(清空后重建);
+// 备份内重复的邮箱会被去重。所有写入在同一事务内完成。
 func (s *Store) Restore(in RestoreInput) (RestoreResult, error) {
 	mode := strings.ToLower(strings.TrimSpace(in.Mode))
 	if mode == "" {
@@ -179,7 +185,7 @@ func (s *Store) Restore(in RestoreInput) (RestoreResult, error) {
 		}
 	}
 
-	find, err := tx.Prepare(`SELECT 1 FROM entries WHERE lower(email) = ? AND lower(site) = ? LIMIT 1`)
+	find, err := tx.Prepare(`SELECT 1 FROM entries WHERE lower(email) = ? LIMIT 1`)
 	if err != nil {
 		return RestoreResult{}, err
 	}
@@ -198,10 +204,11 @@ func (s *Store) Restore(in RestoreInput) (RestoreResult, error) {
 
 	now := time.Now().Format(time.RFC3339)
 	for i, raw := range in.Entries {
-		email, password, site, tags, note, err := normalize(Input{
+		email, password, sites, tags, note, err := normalize(Input{
 			Email:    raw.Email,
 			Password: raw.Password,
 			Site:     raw.Site,
+			Sites:    raw.Sites,
 			Tags:     raw.Tags,
 			Note:     raw.Note,
 		})
@@ -212,7 +219,7 @@ func (s *Store) Restore(in RestoreInput) (RestoreResult, error) {
 		}
 
 		var exists int
-		err = find.QueryRow(strings.ToLower(email), strings.ToLower(site)).Scan(&exists)
+		err = find.QueryRow(strings.ToLower(email)).Scan(&exists)
 		if err == nil {
 			result.Skipped++
 			continue
@@ -231,13 +238,17 @@ func (s *Store) Restore(in RestoreInput) (RestoreResult, error) {
 			ID:        id,
 			Email:     email,
 			Password:  password,
-			Site:      site,
+			Site:      primarySite(sites),
+			Sites:     cloneSites(sites),
 			Tags:      cloneTags(tags),
 			Note:      note,
 			CreatedAt: createdAt,
 			UpdatedAt: updatedAt,
 		}
 		if _, err := insert.Exec(entry.ID, entry.Email, entry.Password, entry.Site, entry.Note, entry.CreatedAt, entry.UpdatedAt); err != nil {
+			return RestoreResult{}, err
+		}
+		if err := insertSites(tx, entry.ID, entry.Sites); err != nil {
 			return RestoreResult{}, err
 		}
 		if err := insertTags(tx, entry.ID, entry.Tags); err != nil {

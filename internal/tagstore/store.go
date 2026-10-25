@@ -43,14 +43,20 @@ const (
 	maxNoteLen     = 500
 	maxTags        = 20
 	maxTagLen      = 32
+	// maxSites 限制单个邮箱可关联的网站数量。
+	maxSites = 50
 )
 
 // Entry 是一条凭据记录:邮箱 + 网站密码 + 项目标签。
+//
+// 一个邮箱对应一条记录,它可能在多个网站用过,因此 Sites 是列表。
+// Site 保留为「主网站」(Sites[0]),用于兼容只认单网站的旧客户端与旧备份。
 type Entry struct {
 	ID        string   `json:"id"`
 	Email     string   `json:"email"`
 	Password  string   `json:"password,omitempty"`
 	Site      string   `json:"site,omitempty"`
+	Sites     []string `json:"sites"`
 	Tags      []string `json:"tags"`
 	Note      string   `json:"note,omitempty"`
 	CreatedAt string   `json:"created_at"`
@@ -58,10 +64,13 @@ type Entry struct {
 }
 
 // Input 是创建/更新一条记录的输入。
+//
+// Sites 优先;只传 Site 时按单网站处理(兼容旧调用方)。
 type Input struct {
 	Email    string   `json:"email"`
 	Password string   `json:"password"`
 	Site     string   `json:"site"`
+	Sites    []string `json:"sites"`
 	Tags     []string `json:"tags"`
 	Note     string   `json:"note"`
 }
@@ -181,6 +190,10 @@ func NewStore(dataDir string) (*Store, error) {
 	// 修复旧版导入遗留的 "-Lord" 一类网站名,避免同一网站被拆成多行统计。
 	// 失败不影响启动,仅表示本次没有完成清理。
 	_, _ = s.repairSiteNames()
+	// 把旧版单值 site 回填到 entry_sites,再把「一个邮箱 + 一个网站一行」的
+	// 历史数据合并成「一个邮箱一行」。
+	_, _ = s.migrateSitesFromColumn()
+	_, _ = s.mergeDuplicateEmails()
 	s.hardenFiles()
 	return s, nil
 }
@@ -248,9 +261,18 @@ func (s *Store) init() error {
 			PRIMARY KEY (entry_id, tag_lower),
 			FOREIGN KEY (entry_id) REFERENCES entries(id) ON DELETE CASCADE
 		)`,
+		`CREATE TABLE IF NOT EXISTS entry_sites (
+			entry_id   TEXT NOT NULL,
+			site       TEXT NOT NULL,
+			site_lower TEXT NOT NULL,
+			ord        INTEGER NOT NULL DEFAULT 0,
+			PRIMARY KEY (entry_id, site_lower),
+			FOREIGN KEY (entry_id) REFERENCES entries(id) ON DELETE CASCADE
+		)`,
 		`CREATE INDEX IF NOT EXISTS idx_entries_updated ON entries(updated_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_entries_email_lower ON entries(lower(email))`,
 		`CREATE INDEX IF NOT EXISTS idx_entry_tags_lower ON entry_tags(tag_lower)`,
+		`CREATE INDEX IF NOT EXISTS idx_entry_sites_lower ON entry_sites(site_lower)`,
 	}
 	for _, stmt := range stmts {
 		if _, err := s.db.Exec(stmt); err != nil {
@@ -358,10 +380,16 @@ func (s *Store) listAll() ([]Entry, error) {
 	if err != nil {
 		return nil, err
 	}
+	sites, err := s.sitesForIDs(ids)
+	if err != nil {
+		return nil, err
+	}
 	for i := range entries {
 		if list, ok := tags[entries[i].ID]; ok {
 			entries[i].Tags = list
 		}
+		entries[i].Sites = cloneSites(sites[entries[i].ID])
+		entries[i].Site = primarySite(entries[i].Sites)
 	}
 	return entries, nil
 }
@@ -439,10 +467,16 @@ func (s *Store) ListPage(q ListQuery) (ListResult, error) {
 	if err != nil {
 		return ListResult{}, err
 	}
+	sites, err := s.sitesForIDs(ids)
+	if err != nil {
+		return ListResult{}, err
+	}
 	for i := range entries {
 		if list, ok := tags[entries[i].ID]; ok {
 			entries[i].Tags = list
 		}
+		entries[i].Sites = cloneSites(sites[entries[i].ID])
+		entries[i].Site = primarySite(entries[i].Sites)
 	}
 	res.Entries = entries
 	return res, nil
@@ -503,13 +537,15 @@ func (s *Store) TagCounts() ([]TagUsage, error) {
 }
 
 // SiteCounts 返回每个网站及其使用记录数,按记录数降序、网站名升序排列。
+//
+// 一个邮箱可关联多个网站,因此按 entry_sites 统计、按 entry_id 去重。
 func (s *Store) SiteCounts() ([]SiteUsage, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	rows, err := s.db.Query(`SELECT MIN(site) AS site, COUNT(*) AS usage
-		FROM entries WHERE site <> ''
-		GROUP BY lower(site)
+	rows, err := s.db.Query(`SELECT MIN(site) AS site, COUNT(DISTINCT entry_id) AS usage
+		FROM entry_sites
+		GROUP BY site_lower
 		ORDER BY usage DESC, lower(site) ASC`)
 	if err != nil {
 		return nil, err
@@ -537,7 +573,7 @@ func (s *Store) Stats() (Stats, error) {
 		SELECT
 			(SELECT COUNT(*) FROM entries),
 			(SELECT COUNT(DISTINCT tag_lower) FROM entry_tags),
-			(SELECT COUNT(DISTINCT lower(site)) FROM entries WHERE site <> ''),
+			(SELECT COUNT(DISTINCT site_lower) FROM entry_sites),
 			(SELECT COUNT(*) FROM entries e
 				WHERE NOT EXISTS (SELECT 1 FROM entry_tags t WHERE t.entry_id = e.id))`).
 		Scan(&st.Total, &st.Tags, &st.Sites, &st.Untagged)
@@ -595,6 +631,41 @@ func (s *Store) repairSiteNames() (int64, error) {
 		}
 		n, _ := res.RowsAffected()
 		affected += n
+
+		// entry_sites 里可能已有同名行(同一邮箱的另一个网站),冲突时直接删掉残留。
+		siteRows, err := s.db.Query(`SELECT entry_id, site FROM entry_sites WHERE site = ?`, site)
+		if err != nil {
+			return affected, err
+		}
+		type siteRow struct{ entryID, site string }
+		pending := make([]siteRow, 0)
+		for siteRows.Next() {
+			var row siteRow
+			if err := siteRows.Scan(&row.entryID, &row.site); err != nil {
+				_ = siteRows.Close()
+				return affected, err
+			}
+			pending = append(pending, row)
+		}
+		if err := siteRows.Err(); err != nil {
+			_ = siteRows.Close()
+			return affected, err
+		}
+		_ = siteRows.Close()
+		for _, row := range pending {
+			res, err := s.db.Exec(`UPDATE OR IGNORE entry_sites SET site = ?, site_lower = ?
+				WHERE entry_id = ? AND site = ?`, cleaned, strings.ToLower(cleaned), row.entryID, site)
+			if err != nil {
+				return affected, err
+			}
+			if n, _ := res.RowsAffected(); n == 0 {
+				if _, err := s.db.Exec(`DELETE FROM entry_sites WHERE entry_id = ? AND site = ?`,
+					row.entryID, site); err != nil {
+					return affected, err
+				}
+			}
+			affected++
+		}
 	}
 	if affected > 0 {
 		s.hardenFiles()
@@ -612,8 +683,8 @@ func (s *Store) SiteTagCounts() ([]SiteTagUsage, error) {
 	defer s.mu.Unlock()
 
 	totals := make(map[string]int)
-	totalRows, err := s.db.Query(`SELECT lower(site) AS site_key, COUNT(*)
-		FROM entries WHERE site <> '' GROUP BY site_key`)
+	totalRows, err := s.db.Query(`SELECT site_lower, COUNT(DISTINCT entry_id)
+		FROM entry_sites GROUP BY site_lower`)
 	if err != nil {
 		return nil, err
 	}
@@ -633,11 +704,10 @@ func (s *Store) SiteTagCounts() ([]SiteTagUsage, error) {
 	_ = totalRows.Close()
 
 	rows, err := s.db.Query(`
-		SELECT lower(e.site) AS site_key, MIN(e.site) AS site,
-		       t.tag_lower AS tag_key, MIN(t.tag) AS tag, COUNT(*) AS usage
-		FROM entries e
-		JOIN entry_tags t ON t.entry_id = e.id
-		WHERE e.site <> ''
+		SELECT s.site_lower AS site_key, MIN(s.site) AS site,
+		       t.tag_lower AS tag_key, MIN(t.tag) AS tag, COUNT(DISTINCT s.entry_id) AS usage
+		FROM entry_sites s
+		JOIN entry_tags t ON t.entry_id = s.entry_id
 		GROUP BY site_key, tag_key
 		ORDER BY site_key, usage DESC, tag_key`)
 	if err != nil {
@@ -682,8 +752,8 @@ func (s *Store) Sites() ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	rows, err := s.db.Query(`SELECT MIN(site) FROM entries
-		WHERE site <> '' GROUP BY lower(site) ORDER BY lower(site)`)
+	rows, err := s.db.Query(`SELECT MIN(site) FROM entry_sites
+		GROUP BY site_lower ORDER BY lower(site)`)
 	if err != nil {
 		return nil, err
 	}
@@ -702,7 +772,7 @@ func (s *Store) Sites() ([]string, error) {
 
 // Create 新建一条记录。
 func (s *Store) Create(in Input) (Entry, error) {
-	email, password, site, tags, note, err := normalize(in)
+	email, password, sites, tags, note, err := normalize(in)
 	if err != nil {
 		return Entry{}, err
 	}
@@ -711,7 +781,8 @@ func (s *Store) Create(in Input) (Entry, error) {
 		ID:        newEntryID(),
 		Email:     email,
 		Password:  password,
-		Site:      site,
+		Site:      primarySite(sites),
+		Sites:     sites,
 		Tags:      tags,
 		Note:      note,
 		CreatedAt: now,
@@ -730,7 +801,7 @@ func (s *Store) Create(in Input) (Entry, error) {
 
 // Update 覆盖更新一条记录。
 func (s *Store) Update(id string, in Input) (Entry, error) {
-	email, password, site, tags, note, err := normalize(in)
+	email, password, sites, tags, note, err := normalize(in)
 	if err != nil {
 		return Entry{}, err
 	}
@@ -753,7 +824,10 @@ func (s *Store) Update(id string, in Input) (Entry, error) {
 	}
 	now := time.Now().Format(time.RFC3339)
 	if _, err := tx.Exec(`UPDATE entries SET email = ?, password = ?, site = ?, note = ?, updated_at = ? WHERE id = ?`,
-		email, password, site, note, now, id); err != nil {
+		email, password, primarySite(sites), note, now, id); err != nil {
+		return Entry{}, err
+	}
+	if err := replaceSitesTx(tx, id, sites); err != nil {
 		return Entry{}, err
 	}
 	if err := replaceTagsTx(tx, id, tags); err != nil {
@@ -767,7 +841,8 @@ func (s *Store) Update(id string, in Input) (Entry, error) {
 		ID:        id,
 		Email:     email,
 		Password:  password,
-		Site:      site,
+		Site:      primarySite(sites),
+		Sites:     cloneSites(sites),
 		Tags:      cloneTags(tags),
 		Note:      note,
 		CreatedAt: createdAt,
@@ -803,6 +878,7 @@ func newEntryID() string {
 func cloneEntry(entry *Entry) Entry {
 	cp := *entry
 	cp.Tags = cloneTags(entry.Tags)
+	cp.Sites = cloneSites(entry.Sites)
 	return cp
 }
 
@@ -828,13 +904,15 @@ func buildWhere(q ListQuery) (string, []any) {
 	search := strings.TrimSpace(q.Search)
 	if search != "" {
 		like := "%" + strings.ToLower(search) + "%"
-		clauses = append(clauses, `(lower(e.email) LIKE ? OR lower(e.site) LIKE ? OR lower(e.note) LIKE ?
+		clauses = append(clauses, `(lower(e.email) LIKE ? OR lower(e.note) LIKE ?
+			OR EXISTS (SELECT 1 FROM entry_sites s WHERE s.entry_id = e.id AND lower(s.site) LIKE ?)
 			OR EXISTS (SELECT 1 FROM entry_tags t WHERE t.entry_id = e.id AND lower(t.tag) LIKE ?))`)
 		args = append(args, like, like, like, like)
 	}
 
 	if site := strings.TrimSpace(q.Site); site != "" {
-		clauses = append(clauses, `lower(e.site) = lower(?)`)
+		clauses = append(clauses, `EXISTS (SELECT 1 FROM entry_sites s
+			WHERE s.entry_id = e.id AND s.site_lower = lower(?))`)
 		args = append(args, site)
 	}
 	if from := strings.TrimSpace(q.CreatedFrom); from != "" {
@@ -922,10 +1000,17 @@ type execer interface {
 }
 
 func insertEntry(db execer, entry *Entry) error {
+	sites := entry.Sites
+	if len(sites) == 0 && entry.Site != "" {
+		sites = []string{entry.Site}
+	}
 	_, err := db.Exec(`INSERT INTO entries(id, email, password, site, note, created_at, updated_at)
 		VALUES(?, ?, ?, ?, ?, ?, ?)`,
-		entry.ID, entry.Email, entry.Password, entry.Site, entry.Note, entry.CreatedAt, entry.UpdatedAt)
+		entry.ID, entry.Email, entry.Password, primarySite(sites), entry.Note, entry.CreatedAt, entry.UpdatedAt)
 	if err != nil {
+		return err
+	}
+	if err := insertSites(db, entry.ID, sites); err != nil {
 		return err
 	}
 	return insertTags(db, entry.ID, entry.Tags)
@@ -986,43 +1071,83 @@ func getEntry(db execer, id string) (Entry, error) {
 	if err != nil {
 		return Entry{}, err
 	}
+	sites, err := loadSites(db, id)
+	if err != nil {
+		return Entry{}, err
+	}
+	if len(sites) == 0 && e.Site != "" {
+		sites = []string{e.Site}
+	}
+	e.Sites = cloneSites(sites)
+	e.Site = primarySite(e.Sites)
 	e.Tags = cloneTags(tags)
 	return e, nil
 }
 
 // normalize 校验并规整输入字段。
-func normalize(in Input) (email, password, site string, tags []string, note string, err error) {
+//
+// 网站支持多值:优先取 Sites,为空时回退到单值的 Site(兼容旧调用方)。
+func normalize(in Input) (email, password string, sites, tags []string, note string, err error) {
 	email = strings.TrimSpace(in.Email)
 	if email == "" {
-		return "", "", "", nil, "", fmt.Errorf("邮箱不能为空")
+		return "", "", nil, nil, "", fmt.Errorf("邮箱不能为空")
 	}
 	if len([]rune(email)) > maxEmailLen {
-		return "", "", "", nil, "", fmt.Errorf("邮箱长度超出限制")
+		return "", "", nil, nil, "", fmt.Errorf("邮箱长度超出限制")
 	}
 	if addr, perr := mail.ParseAddress(email); perr != nil || addr.Address != email {
-		return "", "", "", nil, "", fmt.Errorf("邮箱地址格式无效")
+		return "", "", nil, nil, "", fmt.Errorf("邮箱地址格式无效")
 	}
 
 	password = strings.TrimSpace(in.Password)
 	if len([]rune(password)) > maxPasswordLen {
-		return "", "", "", nil, "", fmt.Errorf("密码长度不能超过 %d 个字符", maxPasswordLen)
+		return "", "", nil, nil, "", fmt.Errorf("密码长度不能超过 %d 个字符", maxPasswordLen)
 	}
 
-	site = strings.TrimSpace(in.Site)
-	if len([]rune(site)) > maxSiteLen {
-		return "", "", "", nil, "", fmt.Errorf("网站名称不能超过 %d 个字符", maxSiteLen)
+	rawSites := in.Sites
+	if len(rawSites) == 0 && strings.TrimSpace(in.Site) != "" {
+		rawSites = []string{in.Site}
+	}
+	sites, err = normalizeSites(rawSites)
+	if err != nil {
+		return "", "", nil, nil, "", err
 	}
 
 	note = strings.TrimSpace(in.Note)
 	if len([]rune(note)) > maxNoteLen {
-		return "", "", "", nil, "", fmt.Errorf("备注不能超过 %d 个字符", maxNoteLen)
+		return "", "", nil, nil, "", fmt.Errorf("备注不能超过 %d 个字符", maxNoteLen)
 	}
 
 	tags, err = normalizeTags(in.Tags)
 	if err != nil {
-		return "", "", "", nil, "", err
+		return "", "", nil, nil, "", err
 	}
-	return email, password, site, tags, note, nil
+	return email, password, sites, tags, note, nil
+}
+
+// normalizeSites 去空白、去重(忽略大小写,保留首次出现的写法)并限制数量/长度。
+func normalizeSites(raw []string) ([]string, error) {
+	sites := make([]string, 0, len(raw))
+	seen := make(map[string]struct{}, len(raw))
+	for _, item := range raw {
+		site := strings.TrimSpace(item)
+		if site == "" {
+			continue
+		}
+		if len([]rune(site)) > maxSiteLen {
+			return nil, fmt.Errorf("网站名称不能超过 %d 个字符", maxSiteLen)
+		}
+		key := strings.ToLower(site)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		sites = append(sites, site)
+	}
+	if len(sites) > maxSites {
+		return nil, fmt.Errorf("单个邮箱的网站数量不能超过 %d 个", maxSites)
+	}
+	return sites, nil
 }
 
 // normalizeTags 去空白、去重(忽略大小写,保留首次出现的写法)并限制数量/长度。
