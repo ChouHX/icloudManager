@@ -86,6 +86,16 @@ type SiteUsage struct {
 	Count int    `json:"count"`
 }
 
+// SiteTagUsage 是单个网站下的标签分布。
+//
+// Total 是该网站的记录数(含未打标签的记录),作为各标签占比的分母;
+// Tags 按使用记录数降序排列,各 Count 之和可能大于 Total(一条记录可带多个标签)。
+type SiteTagUsage struct {
+	Site  string     `json:"site"`
+	Total int        `json:"total"`
+	Tags  []TagUsage `json:"tags"`
+}
+
 // ListQuery 是分页/批量操作共用的筛选条件。
 type ListQuery struct {
 	Page     int
@@ -590,6 +600,79 @@ func (s *Store) repairSiteNames() (int64, error) {
 		s.hardenFiles()
 	}
 	return affected, nil
+}
+
+// SiteTagCounts 返回每个网站下的标签分布,按网站记录数降序、网站名升序排列。
+//
+// 用于回答「同一个网站里,各标签各占多少」:例如网站1 有 100 条记录,
+// 其中标签1 40 条、标签2 60 条,则占比为 40% : 60%。
+// 网站与标签均忽略大小写归并,展示名取字典序最小的写法。
+func (s *Store) SiteTagCounts() ([]SiteTagUsage, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	totals := make(map[string]int)
+	totalRows, err := s.db.Query(`SELECT lower(site) AS site_key, COUNT(*)
+		FROM entries WHERE site <> '' GROUP BY site_key`)
+	if err != nil {
+		return nil, err
+	}
+	for totalRows.Next() {
+		var key string
+		var count int
+		if err := totalRows.Scan(&key, &count); err != nil {
+			_ = totalRows.Close()
+			return nil, err
+		}
+		totals[key] = count
+	}
+	if err := totalRows.Err(); err != nil {
+		_ = totalRows.Close()
+		return nil, err
+	}
+	_ = totalRows.Close()
+
+	rows, err := s.db.Query(`
+		SELECT lower(e.site) AS site_key, MIN(e.site) AS site,
+		       t.tag_lower AS tag_key, MIN(t.tag) AS tag, COUNT(*) AS usage
+		FROM entries e
+		JOIN entry_tags t ON t.entry_id = e.id
+		WHERE e.site <> ''
+		GROUP BY site_key, tag_key
+		ORDER BY site_key, usage DESC, tag_key`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := make([]SiteTagUsage, 0)
+	index := make(map[string]int)
+	for rows.Next() {
+		var siteKey, site, tagKey, tag string
+		var usage int
+		if err := rows.Scan(&siteKey, &site, &tagKey, &tag, &usage); err != nil {
+			return nil, err
+		}
+		pos, ok := index[siteKey]
+		if !ok {
+			pos = len(out)
+			index[siteKey] = pos
+			out = append(out, SiteTagUsage{Site: site, Total: totals[siteKey], Tags: []TagUsage{}})
+		}
+		out[pos].Tags = append(out[pos].Tags, TagUsage{Tag: tag, Count: usage})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// 网站顺序与 SiteCounts 保持一致:记录数多的在前,同数量按名称。
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Total != out[j].Total {
+			return out[i].Total > out[j].Total
+		}
+		return strings.ToLower(out[i].Site) < strings.ToLower(out[j].Site)
+	})
+	return out, nil
 }
 
 // Sites 返回所有记录中出现过的去重网站名,按字母序排列。

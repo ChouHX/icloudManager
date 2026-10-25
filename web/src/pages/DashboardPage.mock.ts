@@ -70,5 +70,32 @@ export const MOCK_DASHBOARD_DATA: DashboardData = {
       { tag: '测试', count: 6 },
       { tag: '待整理', count: 4 },
     ],
+    by_site_tag: [
+      {
+        site: 'GitHub',
+        total: 18,
+        tags: [
+          { tag: '项目A', count: 9 },
+          { tag: '开发', count: 7 },
+          { tag: '测试', count: 3 },
+        ],
+      },
+      {
+        site: 'Steam',
+        total: 12,
+        tags: [
+          { tag: '游戏', count: 10 },
+          { tag: '订阅', count: 3 },
+        ],
+      },
+      {
+        site: 'Google',
+        total: 9,
+        tags: [
+          { tag: '项目A', count: 4 },
+          { tag: '订阅', count: 3 },
+        ],
+      },
+    ],
   },
 }

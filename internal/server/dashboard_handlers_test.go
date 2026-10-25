@@ -82,4 +82,15 @@ func TestDashboardStats(t *testing.T) {
 	if len(tags.ByTag) != 2 || tags.ByTag[0].Tag != "开发" || tags.ByTag[0].Count != 2 {
 		t.Fatalf("标签分布不符: %+v", tags.ByTag)
 	}
+	// 网站 × 标签:GitHub 下共 2 条记录,开发 2 条(100%)、项目A 1 条(50%)。
+	if len(tags.BySiteTag) != 1 {
+		t.Fatalf("网站标签交叉统计不符: %+v", tags.BySiteTag)
+	}
+	cross := tags.BySiteTag[0]
+	if cross.Site != "GitHub" || cross.Total != 2 {
+		t.Fatalf("交叉统计网站不符: %+v", cross)
+	}
+	if len(cross.Tags) != 2 || cross.Tags[0].Tag != "开发" || cross.Tags[0].Count != 2 {
+		t.Fatalf("交叉统计标签不符: %+v", cross.Tags)
+	}
 }

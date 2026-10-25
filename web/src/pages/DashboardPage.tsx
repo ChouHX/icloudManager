@@ -2,7 +2,7 @@ import { Alert, Button, Card, Col, Empty, Progress, Row, Space, Table, Tag, Typo
 import type { TableProps } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
 import { useDashboard } from '../api/hooks'
-import type { AccountSummary } from '../api/types'
+import type { AccountSummary, SiteTagBreakdown } from '../api/types'
 import { sharePercent } from '../utils/format'
 import { MOCK_DASHBOARD_DATA } from './DashboardPage.mock'
 
@@ -157,6 +157,74 @@ function UsageTable({
   )
 }
 
+/**
+ * 网站 × 标签的交叉分布。
+ *
+ * 每个网站的占比分母是「该网站的记录数」，回答的是「这个网站里各标签各占多少」；
+ * 一条记录可带多个标签，因此同一网站下各标签占比之和可能超过 100%。
+ */
+function SiteTagMatrix({ rows }: { rows: SiteTagBreakdown[] }) {
+  if (rows.length === 0) {
+    return <Empty description="暂无数据" />
+  }
+  return (
+    <Row gutter={[16, 16]}>
+      {rows.map((row) => (
+        <Col key={row.site} xs={24} md={12} xl={8}>
+          <div
+            style={{
+              border: '1px solid rgba(148, 163, 184, 0.28)',
+              borderRadius: 8,
+              padding: '10px 12px',
+              height: '100%',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
+              <Typography.Text strong ellipsis style={{ fontSize: 13 }}>
+                {row.site}
+              </Typography.Text>
+              <Typography.Text type="secondary" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
+                {row.total} 条
+              </Typography.Text>
+            </div>
+
+            {row.tags.length === 0 ? (
+              <Typography.Text type="secondary" style={{ display: 'block', marginTop: 6, fontSize: 12 }}>
+                该网站下的记录都未打标签
+              </Typography.Text>
+            ) : (
+              row.tags.map((tag) => {
+                const percent = sharePercent(tag.count, row.total)
+                return (
+                  <div key={tag.tag} style={{ marginTop: 8 }}>
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: 8,
+                        fontSize: 12,
+                      }}
+                    >
+                      <Tag color="blue" style={{ marginInlineEnd: 0, fontSize: 11, lineHeight: '18px' }}>
+                        {tag.tag}
+                      </Tag>
+                      <span style={{ fontVariantNumeric: 'tabular-nums', color: '#94a3b8' }}>
+                        {tag.count} · {percent}%
+                      </span>
+                    </div>
+                    <Progress percent={percent} size="small" showInfo={false} style={{ marginBottom: 0 }} />
+                  </div>
+                )
+              })
+            )}
+          </div>
+        </Col>
+      ))}
+    </Row>
+  )
+}
+
 /** 数据看板:汇总 iCloud 账号别名与标签凭据的网站/标签分布 */
 export default function DashboardPage() {
   // 本地调试:URL 带 ?mock=1 时使用内置 Mock 数据,不请求后端
@@ -252,6 +320,19 @@ export default function DashboardPage() {
             </Card>
           </Col>
         </Row>
+
+        <Card
+          title="网站 × 标签分布"
+          variant="borderless"
+          loading={loading && !data}
+          extra={
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              占比 = 该标签记录数 / 该网站记录数
+            </Typography.Text>
+          }
+        >
+          <SiteTagMatrix rows={tags?.by_site_tag ?? []} />
+        </Card>
       </Space>
     </div>
   )

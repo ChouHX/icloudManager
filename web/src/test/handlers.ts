@@ -194,6 +194,17 @@ export const handlers = [
             { tag: '游戏', count: 1 },
             { tag: '项目A', count: 1 },
           ],
+          by_site_tag: [
+            {
+              site: 'GitHub',
+              total: 1,
+              tags: [
+                { tag: '开发', count: 1 },
+                { tag: '项目A', count: 1 },
+              ],
+            },
+            { site: 'Steam', total: 1, tags: [{ tag: '游戏', count: 1 }] },
+          ],
         },
       },
     }),

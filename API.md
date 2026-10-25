@@ -1052,6 +1052,16 @@ GET /api/dashboard
       "by_tag": [
         { "tag": "开发", "count": 2 },
         { "tag": "项目A", "count": 1 }
+      ],
+      "by_site_tag": [
+        {
+          "site": "GitHub",
+          "total": 2,
+          "tags": [
+            { "tag": "开发", "count": 2 },
+            { "tag": "项目A", "count": 1 }
+          ]
+        }
       ]
     }
   }
@@ -1061,6 +1071,10 @@ GET /api/dashboard
 - `accounts.alias_total` / `accounts.alias_active` 是各账号最后一次检测时记录的数量，不会触发上游请求。
 - `tags.tagged` 等于 `tags.total - tags.untagged`。
 - `by_site` 按网站分组（忽略大小写），按记录数降序；`by_tag` 按标签字母序。
+- `by_site_tag` 是「网站 × 标签」交叉分布：`total` 是该网站的记录数（含未打标签的记录），
+  `tags[].count` 是该标签在该网站下的记录数，占比 = `count / total`。
+  例如网站1 共 5 条记录，标签1 占 2 条、标签2 占 3 条，即 40% : 60%。
+  一条记录可带多个标签，因此同一网站下各标签占比之和可能超过 100%。
 
 ---
 

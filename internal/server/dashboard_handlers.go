@@ -21,13 +21,14 @@ type dashboardAccountStats struct {
 
 // dashboardTagStats 是看板中的标签凭据汇总与分布。
 type dashboardTagStats struct {
-	Total     int                  `json:"total"`
-	Tagged    int                  `json:"tagged"`
-	Untagged  int                  `json:"untagged"`
-	TagKinds  int                  `json:"tag_kinds"`
-	SiteKinds int                  `json:"site_kinds"`
-	BySite    []tagstore.SiteUsage `json:"by_site"`
-	ByTag     []tagstore.TagUsage  `json:"by_tag"`
+	Total     int                     `json:"total"`
+	Tagged    int                     `json:"tagged"`
+	Untagged  int                     `json:"untagged"`
+	TagKinds  int                     `json:"tag_kinds"`
+	SiteKinds int                     `json:"site_kinds"`
+	BySite    []tagstore.SiteUsage    `json:"by_site"`
+	ByTag     []tagstore.TagUsage     `json:"by_tag"`
+	BySiteTag []tagstore.SiteTagUsage `json:"by_site_tag"`
 }
 
 // dashboardResponse 是 GET /api/dashboard 的响应体。
@@ -60,6 +61,11 @@ func (s *Server) dashboardHandler(c *gin.Context) {
 		failCode(c, http.StatusInternalServerError, "INTERNAL_ERROR", "读取标签统计失败")
 		return
 	}
+	bySiteTag, err := s.tags.SiteTagCounts()
+	if err != nil {
+		failCode(c, http.StatusInternalServerError, "INTERNAL_ERROR", "读取网站标签统计失败")
+		return
+	}
 
 	ok(c, dashboardResponse{
 		Accounts: accStats,
@@ -71,6 +77,7 @@ func (s *Server) dashboardHandler(c *gin.Context) {
 			SiteKinds: stats.Sites,
 			BySite:    bySite,
 			ByTag:     byTag,
+			BySiteTag: bySiteTag,
 		},
 	})
 }

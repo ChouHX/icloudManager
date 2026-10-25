@@ -48,5 +48,13 @@ describe('DashboardPage', () => {
     for (const tag of ['开发', '游戏', '项目A']) {
       expect(within(tagCard).getByText(tag)).toBeInTheDocument()
     }
+
+    // 网站 × 标签分布：占比分母是该网站的记录数
+    const crossCard = screen.getByText('网站 × 标签分布').closest('.ant-card') as HTMLElement
+    expect(within(crossCard).getByText('GitHub')).toBeInTheDocument()
+    expect(within(crossCard).getAllByText('1 条')).toHaveLength(2)
+    expect(within(crossCard).getAllByText('1 · 100%')).toHaveLength(3)
+    expect(within(crossCard).getByText('Steam')).toBeInTheDocument()
+    expect(within(crossCard).getByText('游戏')).toBeInTheDocument()
   })
 })

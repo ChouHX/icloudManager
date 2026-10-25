@@ -158,6 +158,15 @@ export interface SiteUsageCount {
   count: number
 }
 
+/** 单个网站下的标签分布（占比分母是该网站的记录数） */
+export interface SiteTagBreakdown {
+  site: string
+  /** 该网站的记录数（含未打标签的记录） */
+  total: number
+  /** 按使用记录数降序；一条记录可带多个标签，合计可能大于 total */
+  tags: TagUsageCount[]
+}
+
 /** 数据看板统计 */
 export interface DashboardData {
   accounts: {
@@ -174,6 +183,8 @@ export interface DashboardData {
     site_kinds: number
     by_site: SiteUsageCount[]
     by_tag: TagUsageCount[]
+    /** 网站 × 标签的交叉分布 */
+    by_site_tag: SiteTagBreakdown[]
   }
 }
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -164,6 +165,68 @@ func TestSiteCounts(t *testing.T) {
 	}
 	if counts[1].Site != "Steam" || counts[1].Count != 1 {
 		t.Fatalf("Steam 统计不符: %+v", counts[1])
+	}
+}
+
+func TestSiteTagCounts(t *testing.T) {
+	s := newTestStore(t)
+	for _, in := range []Input{
+		// 网站1 共 5 条:标签1 2 条、标签2 3 条 → 40% : 60%
+		{Email: "a1@example.com", Site: "网站1", Tags: []string{"标签1"}},
+		{Email: "a2@example.com", Site: "网站1", Tags: []string{"标签1"}},
+		{Email: "a3@example.com", Site: "网站1", Tags: []string{"标签2"}},
+		{Email: "a4@example.com", Site: "网站1", Tags: []string{"标签2"}},
+		{Email: "a5@example.com", Site: "网站1", Tags: []string{"标签2"}},
+		// 大小写不同的网站应归并到同一行
+		{Email: "b1@example.com", Site: "SiteOne", Tags: []string{"标签1"}},
+		// 未打标签的记录仍计入该网站总数(分母)
+		{Email: "b2@example.com", Site: "SITEONE"},
+		// 一条记录带多个标签时,两个标签都会计数
+		{Email: "c1@example.com", Site: "网站2", Tags: []string{"标签1", "标签2"}},
+	} {
+		if _, err := s.Create(in); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got, err := s.SiteTagCounts()
+	if err != nil {
+		t.Fatalf("SiteTagCounts: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("网站应去重,得到 %+v", got)
+	}
+
+	bySite := map[string]SiteTagUsage{}
+	for _, item := range got {
+		bySite[strings.ToLower(item.Site)] = item
+	}
+
+	// 网站1 共 5 条:标签1 2 条、标签2 3 条 → 40% : 60%。
+	one, ok := bySite["网站1"]
+	if !ok {
+		t.Fatalf("缺少网站1: %+v", got)
+	}
+	if one.Total != 5 || len(one.Tags) != 2 {
+		t.Fatalf("网站1 统计不符: %+v", one)
+	}
+	if one.Tags[0].Tag != "标签2" || one.Tags[0].Count != 3 {
+		t.Fatalf("标签应按数量降序: %+v", one.Tags)
+	}
+	if one.Tags[1].Tag != "标签1" || one.Tags[1].Count != 2 {
+		t.Fatalf("标签1 统计不符: %+v", one.Tags)
+	}
+
+	// SiteOne / SITEONE 归并为 2 条,其中 1 条带标签1。
+	merged, ok := bySite["siteone"]
+	if !ok || merged.Total != 2 || len(merged.Tags) != 1 || merged.Tags[0].Count != 1 {
+		t.Fatalf("大小写网站未归并: %+v", got)
+	}
+
+	// 网站2 只有 1 条记录,两个标签各计 1 次,合计会大于 Total。
+	two := bySite["网站2"]
+	if two.Total != 1 || len(two.Tags) != 2 {
+		t.Fatalf("网站2 统计不符: %+v", two)
 	}
 }
 
