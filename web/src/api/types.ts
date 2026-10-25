@@ -258,6 +258,8 @@ export interface TagEntryInput {
 export interface TagImportInput {
   /** 每行一条记录 */
   text: string
+  /** 自定义分隔符;留空则按内容自动识别 */
+  separator: string
   /** 应用到本次导入所有记录的标签 */
   tags: string[]
   /** 行内未指定网站时使用的默认网站 */

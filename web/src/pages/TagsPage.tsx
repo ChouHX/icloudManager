@@ -40,7 +40,7 @@ import { useNavigate } from 'react-router-dom'
 import { ApiError, request } from '../api/client'
 import { useDashboard, useTags } from '../api/hooks'
 import type { DashboardData, TagBatchFilter, TagEntry, TagEntryInput } from '../api/types'
-import { formatDateTime } from '../utils/format'
+import { formatDateTime, sharePercent } from '../utils/format'
 import {
   TagBackupModal,
   TagBatchModal,
@@ -239,8 +239,8 @@ function TagStatsPopover({
 
   const bySite = tags?.by_site ?? []
   const byTag = tags?.by_tag ?? []
-  const maxSite = bySite.reduce((max, item) => Math.max(max, item.count), 0)
-  const maxTag = byTag.reduce((max, item) => Math.max(max, item.count), 0)
+  // 占比以记录总数为分母；按表内最大值归一化会让最大值那行恒为 100%。
+  const total = tags?.total ?? 0
 
   return (
     <div style={{ width: 380 }}>
@@ -273,7 +273,7 @@ function TagStatsPopover({
                   <span style={{ fontVariantNumeric: 'tabular-nums' }}>{item.count}</span>
                 </div>
                 <Progress
-                  percent={maxSite > 0 ? Math.round((item.count / maxSite) * 100) : 0}
+                  percent={sharePercent(item.count, total)}
                   showInfo={false}
                   strokeWidth={4}
                 />
@@ -299,7 +299,7 @@ function TagStatsPopover({
                   <span style={{ fontVariantNumeric: 'tabular-nums' }}>{item.count}</span>
                 </div>
                 <Progress
-                  percent={maxTag > 0 ? Math.round((item.count / maxTag) * 100) : 0}
+                  percent={sharePercent(item.count, total)}
                   showInfo={false}
                   strokeWidth={4}
                 />

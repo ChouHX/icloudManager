@@ -52,6 +52,124 @@ func TestImportParsesCommonFormats(t *testing.T) {
 	}
 }
 
+func TestImportLongDashSeparatorKeepsSiteClean(t *testing.T) {
+	s := newTestStore(t)
+	// 5/6 个连字符曾被按字面量 "----" 切分,残留的 "-" 粘到网站名上,
+	// 导致同一个网站被拆成 Lord / -Lord / --Lord 多行统计。
+	res, err := s.Import(ImportInput{
+		Text: "a@example.com----p1-----Lord\n" +
+			"b@example.com----p2------Lord\n" +
+			"c@example.com-----p3----Lord\n",
+		Tags: []string{"Lord"},
+	})
+	if err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+	if res.Imported != 3 || res.Invalid != 0 {
+		t.Fatalf("导入统计不符: %+v", res)
+	}
+	for _, entry := range res.Entries {
+		if entry.Site != "Lord" {
+			t.Fatalf("网站名被分隔符污染: %q", entry.Site)
+		}
+	}
+	counts, err := s.SiteCounts()
+	if err != nil {
+		t.Fatalf("SiteCounts: %v", err)
+	}
+	if len(counts) != 1 || counts[0].Site != "Lord" || counts[0].Count != 3 {
+		t.Fatalf("网站统计未合并: %+v", counts)
+	}
+}
+
+func TestRepairSiteNamesMergesDashResidue(t *testing.T) {
+	dir := t.TempDir()
+	s, err := NewStore(dir)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	// 直接写入带残留连字符的历史数据,绕过 normalize 的输入校验。
+	for _, site := range []string{"Lord", "-Lord", "--Lord", "---Lord", "Wimbledon"} {
+		if _, err := s.db.Exec(`INSERT INTO entries(id, email, password, site, note, created_at, updated_at)
+			VALUES(?, ?, '', ?, '', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`,
+			newEntryID(), site+"@example.com", site); err != nil {
+			t.Fatalf("插入测试数据: %v", err)
+		}
+	}
+	if _, err := s.repairSiteNames(); err != nil {
+		t.Fatalf("repairSiteNames: %v", err)
+	}
+	counts, err := s.SiteCounts()
+	if err != nil {
+		t.Fatalf("SiteCounts: %v", err)
+	}
+	if len(counts) != 2 || counts[0].Site != "Lord" || counts[0].Count != 4 {
+		t.Fatalf("残留连字符未合并: %+v", counts)
+	}
+	// 幂等:再次执行不应再产生变更。
+	affected, err := s.repairSiteNames()
+	if err != nil {
+		t.Fatalf("repairSiteNames 第二次: %v", err)
+	}
+	if affected != 0 {
+		t.Fatalf("repairSiteNames 不幂等,影响了 %d 行", affected)
+	}
+}
+
+func TestImportCustomSeparator(t *testing.T) {
+	s := newTestStore(t)
+	// 自定义分隔符优先于自动识别:密码里的逗号不会被误切。
+	res, err := s.Import(ImportInput{
+		Text:      "a@example.com|p,1|GitHub\nb@example.com|p|2|Steam",
+		Separator: "|",
+		Tags:      []string{"项目A"},
+	})
+	if err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+	if res.Imported != 2 || res.Invalid != 0 {
+		t.Fatalf("导入统计不符: %+v", res)
+	}
+	byEmail := map[string]Entry{}
+	for _, entry := range res.Entries {
+		byEmail[entry.Email] = entry
+	}
+	if got := byEmail["a@example.com"]; got.Password != "p,1" || got.Site != "GitHub" {
+		t.Fatalf("自定义分隔符未生效: %+v", got)
+	}
+	// 第 4 段之后的内容会被忽略,只取邮箱/密码/网站三列。
+	if got := byEmail["b@example.com"]; got.Password != "p" || got.Site != "2" {
+		t.Fatalf("多列行解析错误: %+v", got)
+	}
+}
+
+func TestImportSeparatorEscapes(t *testing.T) {
+	s := newTestStore(t)
+	// "\t" 两个字面量字符应被识别为真正的制表符。
+	res, err := s.Import(ImportInput{
+		Text:      "a@example.com\tpass-a\tGitHub",
+		Separator: `\t`,
+		Tags:      []string{"项目A"},
+	})
+	if err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+	if res.Imported != 1 {
+		t.Fatalf("导入统计不符: %+v", res)
+	}
+	if got := res.Entries[0]; got.Password != "pass-a" || got.Site != "GitHub" {
+		t.Fatalf("\\t 转义未生效: %+v", got)
+	}
+}
+
+func TestImportSeparatorValidation(t *testing.T) {
+	s := newTestStore(t)
+	if _, err := s.Import(ImportInput{Text: "a@example.com", Separator: "0123456789"}); err == nil {
+		t.Fatalf("超长分隔符应报错")
+	}
+}
+
 func TestImportDefaultSiteAndValidation(t *testing.T) {
 	s := newTestStore(t)
 	res, err := s.Import(ImportInput{

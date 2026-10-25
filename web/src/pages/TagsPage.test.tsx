@@ -191,6 +191,8 @@ describe('TagsPage', { timeout: 30000 }, () => {
     )
     await user.type(within(dialog).getByRole('combobox'), '项目C')
     await user.keyboard('{Enter}')
+    // 自定义分隔符可留空（自动识别），也可以显式指定
+    await user.type(within(dialog).getByPlaceholderText('可留空，例如 :::'), '----')
     await user.click(within(dialog).getByRole('button', { name: /开始导入/ }))
 
     expect(await within(dialog).findByText('导入完成')).toBeInTheDocument()

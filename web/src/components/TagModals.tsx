@@ -44,8 +44,8 @@ import type {
 import { backupFileName, downloadCSV, downloadJSON, exportFileName } from '../utils/exportTags'
 
 const IMPORT_FORMAT_HELP =
-  '每行一条记录，支持「邮箱----密码----网站」，也支持制表符、竖线、逗号、英文冒号或空格分隔；' +
-  '只有邮箱也可以。以 # 开头的行会被忽略。'
+  '每行一条记录，默认自动识别「----、制表符、竖线、逗号、英文冒号、空格」等分隔符；' +
+  '也可以在下方指定自定义分隔符。只有邮箱也可以。以 # 开头的行会被忽略。'
 
 /** 批量导入标签凭据，并给所有导入的记录统一打上选定标签 */
 export function TagImportModal({
@@ -65,7 +65,13 @@ export function TagImportModal({
   const [result, setResult] = useState<TagImportResult | null>(null)
 
   async function handleImport() {
-    let values: { text?: string; tags?: string[]; site?: string; mode?: 'skip' | 'update' }
+    let values: {
+      text?: string
+      separator?: string
+      tags?: string[]
+      site?: string
+      mode?: 'skip' | 'update'
+    }
     try {
       values = await form.validateFields()
     } catch {
@@ -73,6 +79,7 @@ export function TagImportModal({
     }
     const body: TagImportInput = {
       text: values.text ?? '',
+      separator: (values.separator ?? '').trim(),
       tags: values.tags ?? [],
       site: (values.site ?? '').trim(),
       mode: values.mode ?? 'skip',
@@ -181,6 +188,13 @@ export function TagImportModal({
           </Form.Item>
           <Form.Item name="site" label="默认网站" extra="行内未指定网站时使用，例如 GitHub">
             <Input placeholder="可留空" maxLength={100} />
+          </Form.Item>
+          <Form.Item
+            name="separator"
+            label="自定义分隔符"
+            extra="留空则自动识别。填了只按它拆分；制表符可填 \t，支持最多 8 个字符，例如 ::: 或 ;;;"
+          >
+            <Input placeholder="可留空，例如 :::" maxLength={8} spellCheck={false} />
           </Form.Item>
           <Form.Item name="mode" label="已存在的记录（邮箱 + 网站相同）">
             <Radio.Group

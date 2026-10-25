@@ -3,6 +3,7 @@ package tagstore
 import (
 	"database/sql"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -12,6 +13,9 @@ type ImportInput struct {
 	// Text 每行一条记录,支持 `邮箱----密码----网站`、制表符、`|`、逗号、
 	// `邮箱:密码` 或空格分隔;以 # 开头的行视为注释。
 	Text string `json:"text"`
+	// Separator 是自定义分隔符;留空则按 Text 自动识别。
+	// 想用制表符可直接写 "\t"(两个字面量字符),也可传真正的制表符。
+	Separator string `json:"separator"`
 	// Tags 会应用到本次导入的所有记录。
 	Tags []string `json:"tags"`
 	// Site 是行内未指定网站时使用的默认网站。
@@ -59,8 +63,12 @@ func (s *Store) Import(in ImportInput) (ImportResult, error) {
 	if mode != "" && mode != "skip" && mode != "update" {
 		return ImportResult{}, fmt.Errorf("导入模式只能是 skip 或 update")
 	}
+	separator, err := normalizeSeparator(in.Separator)
+	if err != nil {
+		return ImportResult{}, err
+	}
 
-	lines := parseImportText(in.Text)
+	lines := parseImportText(in.Text, separator)
 	if len(lines) == 0 {
 		return ImportResult{}, fmt.Errorf("没有可导入的内容")
 	}
@@ -171,15 +179,42 @@ func (s *Store) Import(in ImportInput) (ImportResult, error) {
 	return result, nil
 }
 
+// maxSeparatorLen 限制自定义分隔符的字符数。
+const maxSeparatorLen = 8
+
+// normalizeSeparator 校验并规整自定义分隔符,返回空串表示按内容自动识别。
+//
+// 支持把制表符/换行写成 `\t`、`\n` 两个字面量字符,方便从 JSON 或命令行传入。
+func normalizeSeparator(raw string) (string, error) {
+	sep := strings.TrimSpace(raw)
+	switch sep {
+	case "":
+		return "", nil
+	case `\t`:
+		return "\t", nil
+	case `\n`:
+		return "\n", nil
+	}
+	if len([]rune(sep)) > maxSeparatorLen {
+		return "", fmt.Errorf("分隔符不能超过 %d 个字符", maxSeparatorLen)
+	}
+	if strings.ContainsAny(sep, "\r\n") {
+		return "", fmt.Errorf("分隔符不能包含换行符")
+	}
+	return sep, nil
+}
+
 // parseImportText 把多行文本解析为待导入行,自动跳过空行与 # 注释。
-func parseImportText(text string) []importLine {
+//
+// separator 非空时按它精确拆分;为空时按内容自动识别常见分隔符。
+func parseImportText(text, separator string) []importLine {
 	out := make([]importLine, 0)
 	for i, raw := range strings.Split(text, "\n") {
 		line := strings.TrimSpace(raw)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		fields := splitImportLine(line)
+		fields := splitImportLine(line, separator)
 		item := importLine{line: i + 1}
 		if len(fields) > 0 {
 			item.email = cleanField(fields[0])
@@ -195,9 +230,21 @@ func parseImportText(text string) []importLine {
 	return out
 }
 
-// splitImportLine 按优先级尝试常见分隔符拆分一行。
-func splitImportLine(line string) []string {
-	for _, sep := range []string{"----", "\t", "|"} {
+// dashSeparator 匹配 4 个及以上的连续连字符。
+//
+// 必须按「连字符段」而不是固定字面量 "----" 拆分:否则 5 个连字符会被切成
+// "----" + "-",残留的 "-" 会粘到下一个字段上,把网站名污染成 "-Lord"。
+var dashSeparator = regexp.MustCompile(`-{4,}`)
+
+// splitImportLine 拆分一行:优先使用自定义分隔符,否则按优先级自动识别。
+func splitImportLine(line, separator string) []string {
+	if separator != "" {
+		return strings.Split(line, separator)
+	}
+	if dashSeparator.MatchString(line) {
+		return dashSeparator.Split(line, -1)
+	}
+	for _, sep := range []string{"\t", "|"} {
 		if strings.Contains(line, sep) {
 			return strings.Split(line, sep)
 		}

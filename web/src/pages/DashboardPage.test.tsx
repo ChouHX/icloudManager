@@ -40,6 +40,8 @@ describe('DashboardPage', () => {
     const siteCard = screen.getByText('按网站统计').closest('.ant-card') as HTMLElement
     expect(within(siteCard).getByText('GitHub')).toBeInTheDocument()
     expect(within(siteCard).getByText('Steam')).toBeInTheDocument()
+    // 占比分母是记录总数(2 条),不是表内最大值:否则最大值那行恒为 100%
+    expect(within(siteCard).getAllByText('50%')).toHaveLength(2)
 
     // 按标签统计
     const tagCard = screen.getByText('按标签统计').closest('.ant-card') as HTMLElement

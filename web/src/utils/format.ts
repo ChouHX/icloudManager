@@ -39,3 +39,14 @@ export function formatDateTime(raw?: string): string {
 export function timestampValue(raw?: string): number | null {
   return parseTimestamp(raw)?.valueOf() ?? null
 }
+
+/**
+ * 占比：count / total，保留一位小数并封顶 100%。
+ *
+ * 分母必须是「记录总数」（例如 3000 个号里有 1000 个用了某标签 → 33.3%），
+ * 不能用「当前表里的最大值」做归一化，否则最大值那一行恒为 100%。
+ */
+export function sharePercent(count: number, total: number): number {
+  if (!Number.isFinite(count) || !Number.isFinite(total) || total <= 0 || count <= 0) return 0
+  return Math.min(100, Math.round((count / total) * 1000) / 10)
+}

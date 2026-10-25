@@ -17,6 +17,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -167,6 +168,9 @@ func NewStore(dataDir string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	// 修复旧版导入遗留的 "-Lord" 一类网站名,避免同一网站被拆成多行统计。
+	// 失败不影响启动,仅表示本次没有完成清理。
+	_, _ = s.repairSiteNames()
 	s.hardenFiles()
 	return s, nil
 }
@@ -531,6 +535,61 @@ func (s *Store) Stats() (Stats, error) {
 		return Stats{}, err
 	}
 	return st, nil
+}
+
+// dashOnlyPrefix 匹配以连字符开头、后面还有内容的网站名。
+//
+// 这类值是旧版导入按字面量 "----" 拆分时的分隔符残留(例如 5 个连字符被切成
+// "----" + "-",网站名就成了 "-Lord")。它会把同一个网站拆成多行统计。
+var dashOnlyPrefix = regexp.MustCompile(`^-+[ \t]*(?P<rest>\S.*)$`)
+
+// repairSiteNames 清理历史数据里由导入分隔符残留产生的网站名(如 "-Lord" → "Lord")。
+//
+// 幂等:没有残留数据时不产生任何写入;重复启动也不会再次变更。
+func (s *Store) repairSiteNames() (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	rows, err := s.db.Query(`SELECT DISTINCT site FROM entries WHERE site LIKE '-%'`)
+	if err != nil {
+		return 0, err
+	}
+	names := make([]string, 0)
+	for rows.Next() {
+		var site string
+		if err := rows.Scan(&site); err != nil {
+			_ = rows.Close()
+			return 0, err
+		}
+		names = append(names, site)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return 0, err
+	}
+	_ = rows.Close()
+
+	var affected int64
+	for _, site := range names {
+		match := dashOnlyPrefix.FindStringSubmatch(site)
+		if match == nil {
+			continue
+		}
+		cleaned := strings.TrimSpace(match[1])
+		if cleaned == "" || cleaned == site {
+			continue
+		}
+		res, err := s.db.Exec(`UPDATE entries SET site = ? WHERE site = ?`, cleaned, site)
+		if err != nil {
+			return affected, err
+		}
+		n, _ := res.RowsAffected()
+		affected += n
+	}
+	if affected > 0 {
+		s.hardenFiles()
+	}
+	return affected, nil
 }
 
 // Sites 返回所有记录中出现过的去重网站名,按字母序排列。

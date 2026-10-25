@@ -13,6 +13,8 @@ func newTestStore(t *testing.T) *Store {
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
+	// Windows 下未关闭的 SQLite 文件会阻塞 t.TempDir 的清理,提前注册关闭。
+	t.Cleanup(func() { _ = s.Close() })
 	return s
 }
 

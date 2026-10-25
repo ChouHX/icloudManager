@@ -3,6 +3,7 @@ import type { TableProps } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
 import { useDashboard } from '../api/hooks'
 import type { AccountSummary } from '../api/types'
+import { sharePercent } from '../utils/format'
 import { MOCK_DASHBOARD_DATA } from './DashboardPage.mock'
 
 /** 顶部紧凑统计卡片 */
@@ -105,9 +106,22 @@ interface UsageRow {
   count: number
 }
 
-/** 网站 / 标签的使用记录数分布 */
-function UsageTable({ rows, labelTitle }: { rows: UsageRow[]; labelTitle: string }) {
-  const max = rows.reduce((acc, row) => Math.max(acc, row.count), 0)
+/**
+ * 网站 / 标签的使用记录数分布。
+ *
+ * 占比统一以「记录总数」为分母（一条记录可带多个标签，所以按标签统计的
+ * 各占比之和会大于 100%，这是预期行为）。不要用「表内最大值」归一化，
+ * 否则最大值那一行永远显示 100%，看起来像占满了整条进度条。
+ */
+function UsageTable({
+  rows,
+  labelTitle,
+  total,
+}: {
+  rows: UsageRow[]
+  labelTitle: string
+  total: number
+}) {
   const columns: TableProps<UsageRow>['columns'] = [
     {
       title: labelTitle,
@@ -121,12 +135,13 @@ function UsageTable({ rows, labelTitle }: { rows: UsageRow[]; labelTitle: string
       align: 'right',
     },
     {
-      title: '占比',
+      title: '占记录总数',
       key: 'ratio',
-      width: 200,
-      render: (_, row) => (
-        <Progress percent={max > 0 ? Math.round((row.count / max) * 100) : 0} size="small" />
-      ),
+      width: 220,
+      render: (_, row) => {
+        const percent = sharePercent(row.count, total)
+        return <Progress percent={percent} size="small" format={() => `${percent}%`} />
+      },
     },
   ]
 
@@ -228,12 +243,12 @@ export default function DashboardPage() {
         <Row gutter={[16, 16]}>
           <Col xs={24} lg={12}>
             <Card title="按网站统计" variant="borderless" loading={loading && !data}>
-              <UsageTable rows={siteRows} labelTitle="网站 / 服务" />
+              <UsageTable rows={siteRows} labelTitle="网站 / 服务" total={tags?.total ?? 0} />
             </Card>
           </Col>
           <Col xs={24} lg={12}>
             <Card title="按标签统计" variant="borderless" loading={loading && !data}>
-              <UsageTable rows={tagRows} labelTitle="项目标签" />
+              <UsageTable rows={tagRows} labelTitle="项目标签" total={tags?.total ?? 0} />
             </Card>
           </Col>
         </Row>
