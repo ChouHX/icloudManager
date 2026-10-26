@@ -1146,13 +1146,14 @@ X-CSRF-Token: <token>
 **公开取件（无需会话）**
 
 ```http
-GET /api/gmail-share/:token/inbox?limit=20&days=7
+GET /api/gmail-share/:token/inbox
 GET /api/gmail-share/:token/inbox/:message_id
 ```
 
 返回结构与 iCloud 别名取件一致（`alias`/`count`/`messages`/`method`），但：
 
-- 邮件已按**全局过滤条件**筛选，`days` 参数不会超过全局配置的上限
+- 固定返回**最近 10 封、不限时间**的邮件，不接受 `limit` / `days` 参数
+- 邮件已按**全局过滤条件**筛选；若全局设置了时间窗口，则以该窗口为准
 - 单封邮件会再次核对过滤条件，命中范围外一律返回 `404`
 - 响应不包含账号 ID 与过滤条件
 

@@ -203,3 +203,24 @@ func TestDuplicateEmailRejected(t *testing.T) {
 		t.Fatal("重复邮箱应报错")
 	}
 }
+
+func TestEffectiveDays(t *testing.T) {
+	cases := []struct {
+		name      string
+		filter    Filter
+		requested int
+		want      int
+	}{
+		{name: "未设置窗口且不限时间", filter: Filter{}, requested: 0, want: 0},
+		{name: "管理员窗口作为默认值", filter: Filter{Days: 7}, requested: 0, want: 7},
+		{name: "管理员窗口作为上限", filter: Filter{Days: 7}, requested: 30, want: 7},
+		{name: "请求范围更小时以请求为准", filter: Filter{Days: 30}, requested: 7, want: 7},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := effectiveDays(tc.filter, tc.requested); got != tc.want {
+				t.Fatalf("effectiveDays = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}

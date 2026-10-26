@@ -59,15 +59,21 @@ describe('PublicInboxPage', () => {
     expect(screen.getByText('近 7 天')).toBeInTheDocument()
   })
 
-  it('Gmail 取件链接走独立接口并说明过滤', async () => {
+  it('Gmail 取件页只显示邮箱与最近邮件，不提供筛选', async () => {
     renderPage(<PublicInboxPage token="gmail-token" kind="gmail" />, {
       route: '/?gtoken=gmail-token',
       path: '/',
     })
 
-    expect(await screen.findByText('Gmail 收件箱')).toBeInTheDocument()
+    // 标题就是邮箱本身，不出现解释文案
+    expect(await screen.findByRole('heading', { name: 'mail@gmail.com' })).toBeInTheDocument()
+    expect(screen.queryByText(/凭取件链接查看/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/过滤条件/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/只读页面/)).not.toBeInTheDocument()
+
     expect(screen.getByText('您的验证码是 123456')).toBeInTheDocument()
-    expect(screen.getByText('mail@gmail.com')).toBeInTheDocument()
-    expect(screen.getByText(/已按管理员设置的过滤条件筛选/)).toBeInTheDocument()
+    // 不能自选条数/时间范围，只有刷新
+    expect(screen.queryAllByRole('combobox')).toHaveLength(0)
+    expect(screen.getByRole('button', { name: '刷新' })).toBeInTheDocument()
   })
 })

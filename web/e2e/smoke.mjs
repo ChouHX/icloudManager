@@ -307,7 +307,8 @@ async function main() {
     await page.locator('.ant-modal-footer button').first().click()
 
     // 7. 取件
-    await page.getByRole('menuitem', { name: '取件' }).click()
+    // 侧栏还有「Gmail 取件」,按菜单项文本精确匹配,避免命中两个入口
+    await page.locator('.app-nav .ant-menu-item').filter({ hasText: /^取件$/ }).click()
     await page.waitForURL('**/inbox**')
     await page.getByText('请验证你的邮箱').waitFor()
     const method = await page.getByText(/读取方式/).first().innerText()

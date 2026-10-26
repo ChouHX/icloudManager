@@ -45,7 +45,9 @@ export default function PublicInboxPage({
       ? `/api/gmail-share/${encodeURIComponent(token)}/inbox`
       : `/api/share/${encodeURIComponent(token)}/inbox`
 
-  const url = `${base}?limit=${limit}&days=${days}`
+  // Gmail 取件固定「最近 10 封、不限时间」,不接受调用方传参
+  const url =
+    kind === 'gmail' ? base : `${base}?limit=${limit}&days=${days}`
   const { data, loading, error, reload } = useFetch<ShareInboxResult>(url)
 
   async function openMessage(record: InboxMessage) {
@@ -95,14 +97,19 @@ export default function PublicInboxPage({
   return (
     <div className="page" style={{ maxWidth: 960, paddingTop: 32 }}>
       <div className="page-head">
-        <div>
-          <h2>{kind === 'gmail' ? 'Gmail 收件箱' : '隐私邮箱收件箱'}</h2>
-          <p>
-            凭取件链接查看 <code>{data?.alias ?? '…'}</code> 收到的邮件（只读
-            {kind === 'gmail' ? '，已按管理员设置的过滤条件筛选' : ''}）
-          </p>
-        </div>
-        {data && (
+        {kind === 'gmail' ? (
+          <div>
+            <h2 className="mono">{data?.alias ?? '…'}</h2>
+          </div>
+        ) : (
+          <div>
+            <h2>隐私邮箱收件箱</h2>
+            <p>
+              凭取件链接查看 <code>{data?.alias ?? '…'}</code> 收到的邮件（只读）
+            </p>
+          </div>
+        )}
+        {kind === 'alias' && data && (
           <Tag
             icon={data.method === 'imap' ? <KeyOutlined /> : <CloudServerOutlined />}
             color={data.method === 'imap' ? 'cyan' : 'default'}
@@ -131,11 +138,17 @@ export default function PublicInboxPage({
           variant="borderless"
           title={`收件箱${data ? ` · ${data.count} 封` : ''}`}
           extra={
-            <Space>
-              <Select value={days} style={{ width: 120 }} options={DAY_OPTIONS} onChange={setDays} />
-              <Select value={limit} style={{ width: 100 }} options={LIMIT_OPTIONS} onChange={setLimit} />
-              <Button icon={<ReloadOutlined />} onClick={reload} loading={loading} aria-label="刷新" />
-            </Space>
+            kind === 'gmail' ? (
+              <Button icon={<ReloadOutlined />} onClick={reload} loading={loading} aria-label="刷新">
+                刷新
+              </Button>
+            ) : (
+              <Space>
+                <Select value={days} style={{ width: 120 }} options={DAY_OPTIONS} onChange={setDays} />
+                <Select value={limit} style={{ width: 100 }} options={LIMIT_OPTIONS} onChange={setLimit} />
+                <Button icon={<ReloadOutlined />} onClick={reload} loading={loading} aria-label="刷新" />
+              </Space>
+            )
           }
         >
           {error && !invalid && <Alert type="error" showIcon title={error} style={{ marginBottom: 16 }} />}
@@ -158,11 +171,11 @@ export default function PublicInboxPage({
         </Card>
       )}
 
-      <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginTop: 16, textAlign: 'center' }}>
-        {kind === 'gmail'
-          ? '这是一个只读页面：只能查看该邮箱过滤后的邮件，无法访问账号设置或其它邮箱。'
-          : '这是一个只读页面：只能查看该别名收到的邮件，无法访问其它别名或账号设置。'}
-      </Typography.Paragraph>
+      {kind === 'alias' && (
+        <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginTop: 16, textAlign: 'center' }}>
+          这是一个只读页面：只能查看该别名收到的邮件，无法访问其它别名或账号设置。
+        </Typography.Paragraph>
+      )}
 
       <Drawer
         open={detail !== null || detailLoading}

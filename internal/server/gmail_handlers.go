@@ -281,6 +281,12 @@ func (s *Server) gmailMessageHandler(c *gin.Context) {
 	ok(c, message)
 }
 
+// shareGmailInboxLimit 是取件页固定展示的邮件数。
+//
+// 取件方不能自选条数与时间范围:固定最近 10 封、不限时间
+// (若管理员设置了全局过滤的时间窗口,则以该窗口为准)。
+const shareGmailInboxLimit = 10
+
 // shareGmailInboxHandler 处理 GET /api/gmail-share/:token/inbox(公开)。
 func (s *Server) shareGmailInboxHandler(c *gin.Context) {
 	accountID, account, okLink := s.gmailShareAccount(c, c.Param("token"))
@@ -288,18 +294,8 @@ func (s *Server) shareGmailInboxHandler(c *gin.Context) {
 		return
 	}
 
-	limit, err := parseInboxInt(c.DefaultQuery("limit", "20"), 1, 100)
-	if err != nil {
-		failCode(c, http.StatusBadRequest, "VALIDATION_ERROR", "参数错误: limit 需为 1-100 的整数")
-		return
-	}
-	days, err := parseInboxInt(c.DefaultQuery("days", "7"), 1, 90)
-	if err != nil {
-		failCode(c, http.StatusBadRequest, "VALIDATION_ERROR", "参数错误: days 需为 1-90 的整数")
-		return
-	}
-
-	messages, method, err := s.gmail.Inbox(accountID, limit, days)
+	// 忽略调用方传入的 limit/days,固定最近 10 封、不限时间。
+	messages, method, err := s.gmail.Inbox(accountID, shareGmailInboxLimit, 0)
 	if err != nil {
 		gmailError(c, err)
 		return
