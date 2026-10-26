@@ -1,6 +1,7 @@
 import { Button, Layout, Menu, Tooltip } from 'antd'
 import {
   DashboardOutlined,
+  GoogleOutlined,
   IdcardOutlined,
   InboxOutlined,
   LogoutOutlined,
@@ -15,6 +16,7 @@ const NAV_ITEMS = [
   { key: '/dashboard', icon: <DashboardOutlined />, label: '数据看板' },
   { key: '/aliases', icon: <TagsOutlined />, label: '创建别名' },
   { key: '/inbox', icon: <InboxOutlined />, label: '取件' },
+  { key: '/gmail', icon: <GoogleOutlined />, label: 'Gmail 取件' },
   { key: '/tags', icon: <IdcardOutlined />, label: '标签账号' },
   { key: '/accounts', icon: <SettingOutlined />, label: '账号设置' },
 ]

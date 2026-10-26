@@ -58,4 +58,16 @@ describe('PublicInboxPage', () => {
     expect(screen.getAllByRole('combobox').length).toBeGreaterThanOrEqual(2)
     expect(screen.getByText('近 7 天')).toBeInTheDocument()
   })
+
+  it('Gmail 取件链接走独立接口并说明过滤', async () => {
+    renderPage(<PublicInboxPage token="gmail-token" kind="gmail" />, {
+      route: '/?gtoken=gmail-token',
+      path: '/',
+    })
+
+    expect(await screen.findByText('Gmail 收件箱')).toBeInTheDocument()
+    expect(screen.getByText('您的验证码是 123456')).toBeInTheDocument()
+    expect(screen.getByText('mail@gmail.com')).toBeInTheDocument()
+    expect(screen.getByText(/已按管理员设置的过滤条件筛选/)).toBeInTheDocument()
+  })
 })

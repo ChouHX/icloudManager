@@ -1036,7 +1036,103 @@ X-CSRF-Token: <token>
 备份类型/版本不匹配或没有可导入记录时返回 `400 VALIDATION_ERROR`。
 所有写入在同一个 SQLite 事务内完成，任一步失败都会整体回滚。
 
-### 5.13 数据看板
+### 5.13 Gmail 取件（独立于 iCloud 账号）
+
+管理员导入 Gmail 账号后，可为每个邮箱生成一个取件链接；未登录用户凭链接只能看到
+**符合管理员配置的过滤条件**的邮件。账号数据存放在 `data/gmail.db`（0600），
+密码、2FA 密钥、应用专用密码只写不读，接口只返回 `has_*` 布尔标记。
+
+**批量导入**
+
+```http
+POST /api/gmail/import
+X-CSRF-Token: <token>
+
+{ "text": "a@gmail.com----登录密码----JBSWY3DPEHPK3PXP----应用专用密码", "separator": "" }
+```
+
+每行格式：`账号----密码----2FA 密钥----应用专用密码`。中间字段可留空
+（`账号----密码--------应用专用密码`），只有账号/密码也能导入。
+以邮箱为唯一键：已存在则只覆盖非空字段（`updated`），否则新建（`imported`）。
+
+**账号列表**
+
+```http
+GET /api/gmail
+```
+
+```json
+{
+  "success": true,
+  "data": {
+    "count": 1,
+    "accounts": [
+      {
+        "id": "gm_1a2b3c4d",
+        "email": "a@gmail.com",
+        "filter": { "include": ["验证码"], "exclude": ["广告"], "days": 7 },
+        "status": "active",
+        "has_password": true,
+        "has_totp": true,
+        "has_app_password": true,
+        "share_token": "…",
+        "share_hits": 3,
+        "last_checked": "2026-10-26T09:00:00+08:00"
+      }
+    ]
+  }
+}
+```
+
+**新增 / 更新 / 删除**
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| POST | `/api/gmail` | 新增，字段 `email`、`password`、`totp_secret`、`app_password`、`note`、`filter` |
+| PUT | `/api/gmail/:id` | 更新；密码类字段留空表示不修改 |
+| PUT | `/api/gmail/:id/filter` | 只更新过滤条件 |
+| POST | `/api/gmail/:id/check` | 用应用专用密码验证 IMAP 登录 |
+| DELETE | `/api/gmail/:id` | 删除账号，同时撤销取件链接 |
+
+**取件过滤**
+
+```json
+{ "include": ["验证码", "noreply"], "exclude": ["广告"], "days": 7 }
+```
+
+- `include`：主题或发件人包含任一关键词才可见（忽略大小写）；为空表示不限制
+- `exclude`：命中任一关键词一律隐藏，优先级高于 `include`
+- `days`：只显示最近 N 天，`0` 表示不限制，上限 90
+
+**取件链接**
+
+```http
+POST /api/gmail/:id/share-link
+```
+
+```json
+{ "success": true, "data": { "email": "a@gmail.com", "token": "…", "url": "https://host/?gtoken=…" } }
+```
+
+`DELETE /api/gmail/:id/share-link` 撤销。链接公开可读，无需登录。
+
+**公开取件（无需会话）**
+
+```http
+GET /api/gmail-share/:token/inbox?limit=20&days=7
+GET /api/gmail-share/:token/inbox/:message_id
+```
+
+返回结构与 iCloud 别名取件一致（`alias`/`count`/`messages`/`method`），但：
+
+- 邮件已按该账号的过滤条件筛选，`days` 参数不会超过管理员配置的上限
+- 单封邮件会再次核对过滤条件，命中范围外一律返回 `404`
+- 响应不包含账号 ID 与过滤条件
+
+管理员预览用 `GET /api/gmail/:id/inbox` 与 `GET /api/gmail/:id/inbox/:message_id`，
+同样应用过滤条件（便于确认用户会看到什么）。
+
+### 5.14 数据看板
 
 ```http
 GET /api/dashboard

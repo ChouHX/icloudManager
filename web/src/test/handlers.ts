@@ -111,8 +111,24 @@ export const TAG_ENTRIES = [
   },
 ]
 
-/** 与后端 ListQuery 对应的筛选逻辑,供列表与批量打标签复用 */
-function filterTagEntries(query: {
+export const GMAIL_ACCOUNTS = [
+  {
+    id: 'gm_1',
+    email: 'mail@gmail.com',
+    note: '',
+    filter: { include: ['验证码'], exclude: [], days: 7 },
+    status: 'active',
+    has_password: true,
+    has_totp: true,
+    has_app_password: true,
+    last_checked: '2026-10-26T09:00:00+08:00',
+    last_error: '',
+    created_at: '2026-10-20T09:00:00+08:00',
+    updated_at: '2026-10-26T09:00:00+08:00',
+  },
+]
+
+/** 与后端 ListQuery 对应的筛选逻辑,供列表与批量打标签复用 */function filterTagEntries(query: {
   search?: string
   tags?: string[]
   site?: string
@@ -524,6 +540,94 @@ export const handlers = [
           { time: '2026-09-16T20:30:05+08:00', level: 'warn', message: '[备用号] 命中速率限制,冷却 30m0s 后继续' },
           { time: '2026-09-16T20:30:12+08:00', level: 'info', message: '[主号] 等待 27s 后继续' },
           { time: '2026-09-16T20:30:20+08:00', level: 'success', message: '[主号] 创建成功 auto3@icloud.com(总计 5/700)' },
+        ],
+      },
+    }),
+  ),
+  http.get('/api/gmail', () =>
+    HttpResponse.json({
+      success: true,
+      data: {
+        count: GMAIL_ACCOUNTS.length,
+        accounts: GMAIL_ACCOUNTS,
+      },
+    }),
+  ),
+  http.post('/api/gmail/import', () =>
+    HttpResponse.json({
+      success: true,
+      data: { imported: 1, updated: 0, invalid: 1, errors: ['第 2 行: 邮箱地址格式无效'] },
+    }),
+  ),
+  http.put('/api/gmail/:id/filter', async ({ params, request }) => {
+    const body = (await request.json()) as { include?: string[]; exclude?: string[]; days?: number }
+    const account = GMAIL_ACCOUNTS.find((item) => item.id === params.id) ?? GMAIL_ACCOUNTS[0]
+    return HttpResponse.json({
+      success: true,
+      data: {
+        ...account,
+        filter: { include: body.include ?? [], exclude: body.exclude ?? [], days: body.days ?? 0 },
+      },
+    })
+  }),
+  http.post('/api/gmail/:id/share-link', ({ params }) => {
+    const account = GMAIL_ACCOUNTS.find((item) => item.id === params.id) ?? GMAIL_ACCOUNTS[0]
+    return HttpResponse.json({
+      success: true,
+      data: {
+        email: account.email,
+        token: 'gmail-token',
+        url: `http://127.0.0.1:5173/?gtoken=gmail-token`,
+        created_at: '2026-10-26T10:00:00+08:00',
+        hits: 0,
+      },
+    })
+  }),
+  http.delete('/api/gmail/:id/share-link', () =>
+    HttpResponse.json({ success: true, data: { email: 'mail@gmail.com', removed: true } }),
+  ),
+  http.post('/api/gmail/:id/check', () =>
+    HttpResponse.json({ success: true, data: { id: 'gm_1', status: 'active' } }),
+  ),
+  http.delete('/api/gmail/:id', () =>
+    HttpResponse.json({ success: true, data: { id: 'gm_1', removed: true } }),
+  ),
+  http.get('/api/gmail/:id/inbox', () =>
+    HttpResponse.json({
+      success: true,
+      data: {
+        email: 'mail@gmail.com',
+        count: 1,
+        method: 'imap',
+        messages: [
+          {
+            id: '101',
+            from: 'noreply@example.com',
+            to: 'mail@gmail.com',
+            subject: '您的验证码是 123456',
+            date: '2026-10-26T09:00:00+08:00',
+            preview: '验证码 123456',
+          },
+        ],
+      },
+    }),
+  ),
+  http.get('/api/gmail-share/:token/inbox', () =>
+    HttpResponse.json({
+      success: true,
+      data: {
+        alias: 'mail@gmail.com',
+        count: 1,
+        method: 'imap',
+        messages: [
+          {
+            id: '101',
+            from: 'noreply@example.com',
+            to: 'mail@gmail.com',
+            subject: '您的验证码是 123456',
+            date: '2026-10-26T09:00:00+08:00',
+            preview: '验证码 123456',
+          },
         ],
       },
     }),

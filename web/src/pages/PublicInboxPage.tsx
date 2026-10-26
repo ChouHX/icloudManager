@@ -22,17 +22,30 @@ const LIMIT_OPTIONS = [
 /**
  * 凭取件链接访问的独立界面。
  *
- * 只读:展示该 token 对应别名收到的邮件与正文,不涉及账号管理、
- * 不显示其它别名,也不提供删除等写操作。
+ * 只读:展示该 token 对应邮箱收到的邮件与正文,不涉及账号管理、
+ * 不显示其它地址,也不提供删除等写操作。
+ *
+ * kind 为 gmail 时走 Gmail 取件接口,邮件已由管理员配置的过滤条件筛选过。
  */
-export default function PublicInboxPage({ token }: { token: string }) {
+export default function PublicInboxPage({
+  token,
+  kind = 'alias',
+}: {
+  token: string
+  kind?: 'alias' | 'gmail'
+}) {
   const [days, setDays] = useState(7)
   const [limit, setLimit] = useState(20)
   const [detail, setDetail] = useState<FullMessage | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailError, setDetailError] = useState('')
 
-  const url = `/api/share/${encodeURIComponent(token)}/inbox?limit=${limit}&days=${days}`
+  const base =
+    kind === 'gmail'
+      ? `/api/gmail-share/${encodeURIComponent(token)}/inbox`
+      : `/api/share/${encodeURIComponent(token)}/inbox`
+
+  const url = `${base}?limit=${limit}&days=${days}`
   const { data, loading, error, reload } = useFetch<ShareInboxResult>(url)
 
   async function openMessage(record: InboxMessage) {
@@ -40,7 +53,7 @@ export default function PublicInboxPage({ token }: { token: string }) {
     setDetailError('')
     try {
       const full = await request<FullMessage>(
-        `/api/share/${encodeURIComponent(token)}/inbox/${encodeURIComponent(record.id)}`,
+        `${base}/${encodeURIComponent(record.id)}`,
       )
       setDetail(full)
     } catch (err) {
@@ -83,9 +96,10 @@ export default function PublicInboxPage({ token }: { token: string }) {
     <div className="page" style={{ maxWidth: 960, paddingTop: 32 }}>
       <div className="page-head">
         <div>
-          <h2>隐私邮箱收件箱</h2>
+          <h2>{kind === 'gmail' ? 'Gmail 收件箱' : '隐私邮箱收件箱'}</h2>
           <p>
-            凭取件链接查看 <code>{data?.alias ?? '…'}</code> 收到的邮件（只读）
+            凭取件链接查看 <code>{data?.alias ?? '…'}</code> 收到的邮件（只读
+            {kind === 'gmail' ? '，已按管理员设置的过滤条件筛选' : ''}）
           </p>
         </div>
         {data && (
@@ -145,7 +159,9 @@ export default function PublicInboxPage({ token }: { token: string }) {
       )}
 
       <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginTop: 16, textAlign: 'center' }}>
-        这是一个只读页面：只能查看该别名收到的邮件，无法访问其它别名或账号设置。
+        {kind === 'gmail'
+          ? '这是一个只读页面：只能查看该邮箱过滤后的邮件，无法访问账号设置或其它邮箱。'
+          : '这是一个只读页面：只能查看该别名收到的邮件，无法访问其它别名或账号设置。'}
       </Typography.Paragraph>
 
       <Drawer

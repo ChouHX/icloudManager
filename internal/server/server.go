@@ -26,6 +26,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"icloud-hme/internal/account"
 	"icloud-hme/internal/auth"
+	"icloud-hme/internal/gmail"
 	"icloud-hme/internal/hme"
 	"icloud-hme/internal/mail"
 	"icloud-hme/internal/share"
@@ -56,6 +57,9 @@ type Server struct {
 
 	// 标签凭据管理(独立于 iCloud 账号,见 tag_handlers.go)
 	tags *tagstore.Store
+
+	// Gmail 账号与取件(独立于 iCloud 账号,见 gmail_handlers.go)
+	gmail *gmail.Store
 
 	// 后台自动建满任务(全局单任务,见 autocreate.go)
 	autoMu sync.Mutex
@@ -98,11 +102,16 @@ func newWithBackend(be Backend, cfg Config) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	gmailStore, err := gmail.NewStore(dataDir)
+	if err != nil {
+		return nil, err
+	}
 	s := &Server{
 		be:      be,
 		auth:    authManager,
 		share:   shareStore,
 		tags:    tagStore,
+		gmail:   gmailStore,
 		limiter: auth.NewLimiter(nil, 15*time.Minute, 5, 10000),
 		cfg:     cfg,
 	}
@@ -133,6 +142,8 @@ func (s *Server) register() {
 		// ===== 公开:凭取件链接的 token 只读取件(无需会话) =====
 		api.GET("/share/:token/inbox", s.shareInboxHandler)
 		api.GET("/share/:token/inbox/:message_id", s.shareMessageHandler)
+		api.GET("/gmail-share/:token/inbox", s.shareGmailInboxHandler)
+		api.GET("/gmail-share/:token/inbox/:message_id", s.shareGmailMessageHandler)
 
 		// ===== 受保护路由:统一 requireSession =====
 		authed := api.Group("")
@@ -191,6 +202,19 @@ func (s *Server) register() {
 			authed.DELETE("/tags/:id", csrfCheck(s.auth), s.deleteTagHandler)
 			authed.PUT("/tag-labels/rename", csrfCheck(s.auth), s.renameTagLabelHandler)
 			authed.DELETE("/tag-labels/:name", csrfCheck(s.auth), s.deleteTagLabelHandler)
+
+			// ===== Gmail 账号与取件(独立于 iCloud 账号) =====
+			authed.GET("/gmail", s.listGmailHandler)
+			authed.POST("/gmail", csrfCheck(s.auth), s.createGmailHandler)
+			authed.POST("/gmail/import", csrfCheck(s.auth), s.importGmailHandler)
+			authed.PUT("/gmail/:id", csrfCheck(s.auth), s.updateGmailHandler)
+			authed.PUT("/gmail/:id/filter", csrfCheck(s.auth), s.updateGmailFilterHandler)
+			authed.POST("/gmail/:id/check", csrfCheck(s.auth), s.checkGmailHandler)
+			authed.DELETE("/gmail/:id", csrfCheck(s.auth), s.deleteGmailHandler)
+			authed.POST("/gmail/:id/share-link", csrfCheck(s.auth), s.createGmailShareHandler)
+			authed.DELETE("/gmail/:id/share-link", csrfCheck(s.auth), s.revokeGmailShareHandler)
+			authed.GET("/gmail/:id/inbox", s.gmailInboxHandler)
+			authed.GET("/gmail/:id/inbox/:message_id", s.gmailMessageHandler)
 
 			// ===== 系统 =====
 			authed.POST("/reload", csrfCheck(s.auth), s.reloadConfigHandler)

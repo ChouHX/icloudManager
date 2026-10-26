@@ -69,6 +69,70 @@ export interface ShareInboxResult {
   method: 'imap' | 'web_api'
 }
 
+/** Gmail 取件过滤条件 */
+export interface GmailFilter {
+  /** 主题或发件人包含任一关键词才可见；为空表示不限制 */
+  include: string[]
+  /** 命中任一关键词则隐藏，优先级高于 include */
+  exclude: string[]
+  /** 只显示最近 N 天，0 表示不限制（后端上限 90） */
+  days: number
+}
+
+/** Gmail 账号（不含任何密码字段） */
+export interface GmailAccount {
+  id: string
+  email: string
+  note?: string
+  filter: GmailFilter
+  status: string
+  has_password: boolean
+  has_totp: boolean
+  has_app_password: boolean
+  last_checked?: string
+  last_error?: string
+  created_at: string
+  updated_at: string
+  /** 已生成的取件链接 token */
+  share_token?: string
+  share_hits?: number
+  share_created_at?: string
+  share_last_used_at?: string
+}
+
+/** Gmail 账号列表结果 */
+export interface GmailListResult {
+  count: number
+  accounts: GmailAccount[]
+}
+
+/** Gmail 批量导入结果 */
+export interface GmailImportResult {
+  imported: number
+  updated: number
+  invalid: number
+  errors: string[]
+}
+
+/** 创建/更新 Gmail 账号的输入；密码类字段留空表示不修改 */
+export interface GmailAccountInput {
+  email: string
+  password: string
+  totp_secret: string
+  app_password: string
+  note: string
+  filter: GmailFilter
+}
+
+/** Gmail 取件链接信息 */
+export interface GmailShareLink {
+  email: string
+  token: string
+  url: string
+  created_at: string
+  hits: number
+}
+
 export interface AliasListResult {
   account_id: string
   count: number

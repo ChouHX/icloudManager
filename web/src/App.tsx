@@ -8,6 +8,7 @@ import AliasesPage from './pages/AliasesPage'
 import InboxPage from './pages/InboxPage'
 import AccountsPage from './pages/AccountsPage'
 import DashboardPage from './pages/DashboardPage'
+import GmailPage from './pages/GmailPage'
 import PublicInboxPage from './pages/PublicInboxPage'
 import TagsPage from './pages/TagsPage'
 
@@ -29,12 +30,16 @@ function ProtectedLayout() {
 }
 
 /**
- * 根路径入口:带 ?token= 时进入只读取件页(无需登录),
- * 否则按正常流程跳转到管理界面。
+ * 根路径入口:带 ?token= 时进入 iCloud 别名取件页,带 ?gtoken= 时进入 Gmail 取件页
+ * (均无需登录),否则按正常流程跳转到管理界面。
  */
 function RootEntry() {
   const [searchParams] = useSearchParams()
+  const gmailToken = searchParams.get('gtoken') ?? ''
   const token = searchParams.get('token') ?? ''
+  if (gmailToken) {
+    return <PublicInboxPage token={gmailToken} kind="gmail" />
+  }
   if (!token) {
     return <Navigate to="/aliases" replace />
   }
@@ -52,6 +57,7 @@ export default function App() {
             <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/aliases" element={<AliasesPage />} />
             <Route path="/inbox" element={<InboxPage />} />
+            <Route path="/gmail" element={<GmailPage />} />
             <Route path="/accounts" element={<AccountsPage />} />
             <Route path="/tags" element={<TagsPage />} />
             <Route path="*" element={<Navigate to="/aliases" replace />} />
