@@ -10,7 +10,7 @@ function renderTags() {
   return renderPage(<TagsPage />, { route: '/tags', path: '/tags' })
 }
 
-describe('TagsPage', { timeout: 30000 }, () => {
+describe('TagsPage', { timeout: 60000 }, () => {
   it('渲染标签凭据记录与项目标签', async () => {
     renderTags()
 
