@@ -612,8 +612,22 @@ export const handlers = [
       },
     }),
   ),
-  http.get('/api/gmail-share/:token/inbox', () =>
+  http.get('/api/gmail/:id/inbox/:messageId', ({ params }) =>
     HttpResponse.json({
+      success: true,
+      data: {
+        id: String(params.messageId),
+        from: 'noreply@example.com',
+        to: 'mail@gmail.com',
+        subject: '您的验证码是 123456',
+        date: '2026-10-26T09:00:00+08:00',
+        preview: '验证码 123456',
+        body: '验证码 123456',
+        content_type: 'text/plain',
+      },
+    }),
+  ),
+  http.get('/api/gmail-share/:token/inbox', () =>    HttpResponse.json({
       success: true,
       data: {
         alias: 'mail@gmail.com',

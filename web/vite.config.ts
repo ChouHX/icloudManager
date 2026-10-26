@@ -26,5 +26,9 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
     globals: true,
+    // Ant Design 交互在 CI 的共享 runner 上明显慢于本地(约 2-3 倍),
+    // 默认 5s 容易把正常的弹窗/表格用例判成超时。
+    testTimeout: 60000,
+    hookTimeout: 60000,
   },
 })
