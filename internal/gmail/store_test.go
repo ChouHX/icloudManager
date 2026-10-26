@@ -140,15 +140,14 @@ func TestFilterMatch(t *testing.T) {
 	}
 }
 
-func TestFilterNormalizeAndSet(t *testing.T) {
-	s := newTestStore(t)
-	if _, err := s.Create(Input{Email: "c@gmail.com", AppPassword: "app"}); err != nil {
-		t.Fatalf("Create: %v", err)
+func TestFilterIsGlobalAndPersisted(t *testing.T) {
+	dir := t.TempDir()
+	s, err := NewStore(dir)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
 	}
-	accounts, _ := s.List()
-	id := accounts[0].ID
 
-	got, err := s.SetFilter(id, Filter{
+	got, err := s.SetFilter(Filter{
 		Include: []string{" 验证码 ", "验证码", ""},
 		Exclude: []string{"广告"},
 		Days:    500,
@@ -156,19 +155,26 @@ func TestFilterNormalizeAndSet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SetFilter: %v", err)
 	}
-	if len(got.Filter.Include) != 1 || got.Filter.Include[0] != "验证码" {
-		t.Fatalf("关键词应去空白去重: %+v", got.Filter.Include)
+	if len(got.Include) != 1 || got.Include[0] != "验证码" {
+		t.Fatalf("关键词应去空白去重: %+v", got.Include)
 	}
-	if got.Filter.Days != maxFilterDays {
-		t.Fatalf("天数应被限制为 %d,得到 %d", maxFilterDays, got.Filter.Days)
+	if got.Days != maxFilterDays {
+		t.Fatalf("天数应被限制为 %d,得到 %d", maxFilterDays, got.Days)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
 	}
 
-	// 过滤条件在重新打开后仍然存在
-	reopened, err := NewStore(t.TempDir())
+	// 过滤是全局设置，重新打开后仍然生效
+	reopened, err := NewStore(dir)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("重新打开: %v", err)
 	}
-	_ = reopened.Close()
+	t.Cleanup(func() { _ = reopened.Close() })
+	again := reopened.Filter()
+	if len(again.Include) != 1 || again.Days != maxFilterDays {
+		t.Fatalf("全局过滤未持久化: %+v", again)
+	}
 }
 
 func TestUpdateKeepsSecretsWhenBlank(t *testing.T) {

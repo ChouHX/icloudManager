@@ -116,7 +116,6 @@ export const GMAIL_ACCOUNTS = [
     id: 'gm_1',
     email: 'mail@gmail.com',
     note: '',
-    filter: { include: ['验证码'], exclude: [], days: 7 },
     status: 'active',
     has_password: true,
     has_totp: true,
@@ -549,6 +548,7 @@ export const handlers = [
       success: true,
       data: {
         count: GMAIL_ACCOUNTS.length,
+        filter: { include: ['验证码'], exclude: [], days: 7 },
         accounts: GMAIL_ACCOUNTS,
       },
     }),
@@ -559,17 +559,23 @@ export const handlers = [
       data: { imported: 1, updated: 0, invalid: 1, errors: ['第 2 行: 邮箱地址格式无效'] },
     }),
   ),
-  http.put('/api/gmail/:id/filter', async ({ params, request }) => {
+  http.put('/api/gmail/filter', async ({ request }) => {
     const body = (await request.json()) as { include?: string[]; exclude?: string[]; days?: number }
-    const account = GMAIL_ACCOUNTS.find((item) => item.id === params.id) ?? GMAIL_ACCOUNTS[0]
     return HttpResponse.json({
       success: true,
-      data: {
-        ...account,
-        filter: { include: body.include ?? [], exclude: body.exclude ?? [], days: body.days ?? 0 },
-      },
+      data: { include: body.include ?? [], exclude: body.exclude ?? [], days: body.days ?? 0 },
     })
   }),
+  http.post('/api/gmail/share-links', () =>
+    HttpResponse.json({
+      success: true,
+      data: {
+        count: 1,
+        items: [{ email: 'mail@gmail.com', url: 'http://127.0.0.1:5173/?gtoken=gmail-token', token: 'gmail-token' }],
+        text: 'mail@gmail.com----http://127.0.0.1:5173/?gtoken=gmail-token',
+      },
+    }),
+  ),
   http.post('/api/gmail/:id/share-link', ({ params }) => {
     const account = GMAIL_ACCOUNTS.find((item) => item.id === params.id) ?? GMAIL_ACCOUNTS[0]
     return HttpResponse.json({

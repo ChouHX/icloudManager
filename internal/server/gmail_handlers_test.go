@@ -77,14 +77,28 @@ func TestGmailImportAndList(t *testing.T) {
 		t.Fatalf("无效 token 应 404,得到 %d", status)
 	}
 
-	// 过滤条件可单独更新
-	status, resp, _ = do(t, tagAuthed(t, ts, sess, csrf, "PUT", "/api/gmail/"+id+"/filter",
+	// 过滤是全局设置，不再按账号配置
+	status, resp, _ = do(t, tagAuthed(t, ts, sess, csrf, "PUT", "/api/gmail/filter",
 		`{"include":["验证码"],"exclude":["广告"],"days":500}`))
 	if status != http.StatusOK {
 		t.Fatalf("更新过滤失败: %d %s", status, resp)
 	}
 	if !strings.Contains(resp, `"days":90`) {
 		t.Fatalf("天数应被限制为 90: %s", resp)
+	}
+	// 列表里也能读到同一份全局过滤
+	status, resp, _ = do(t, tagAuthed(t, ts, sess, csrf, "GET", "/api/gmail", ""))
+	if status != http.StatusOK || !strings.Contains(resp, `"include":["验证码"]`) {
+		t.Fatalf("列表应返回全局过滤: %d %s", status, resp)
+	}
+
+	// 批量导出取件链接：账号----链接
+	status, resp, _ = do(t, tagAuthed(t, ts, sess, csrf, "POST", "/api/gmail/share-links", ""))
+	if status != http.StatusOK {
+		t.Fatalf("批量导出失败: %d %s", status, resp)
+	}
+	if !strings.Contains(resp, `a@gmail.com----http`) || !strings.Contains(resp, "gtoken=") {
+		t.Fatalf("导出格式不符: %s", resp)
 	}
 
 	// 删除账号会一并撤销取件链接

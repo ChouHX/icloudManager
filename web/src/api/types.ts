@@ -84,7 +84,6 @@ export interface GmailAccount {
   id: string
   email: string
   note?: string
-  filter: GmailFilter
   status: string
   has_password: boolean
   has_totp: boolean
@@ -100,10 +99,19 @@ export interface GmailAccount {
   share_last_used_at?: string
 }
 
-/** Gmail 账号列表结果 */
+/** Gmail 账号列表结果（filter 为全局取件过滤） */
 export interface GmailListResult {
   count: number
+  filter: GmailFilter
   accounts: GmailAccount[]
+}
+
+/** 批量导出取件链接的结果 */
+export interface GmailShareLinksResult {
+  count: number
+  items: { email: string; url: string; token: string }[]
+  /** 每行「账号----取件链接」的文本 */
+  text: string
 }
 
 /** Gmail 批量导入结果 */
@@ -121,7 +129,6 @@ export interface GmailAccountInput {
   totp_secret: string
   app_password: string
   note: string
-  filter: GmailFilter
 }
 
 /** Gmail 取件链接信息 */

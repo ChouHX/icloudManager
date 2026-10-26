@@ -56,7 +56,6 @@ func (s *Server) listGmailHandler(c *gin.Context) {
 			"id":               account.ID,
 			"email":            account.Email,
 			"note":             account.Note,
-			"filter":           account.Filter,
 			"status":           account.Status,
 			"has_password":     account.HasPassword,
 			"has_totp":         account.HasTOTP,
@@ -74,7 +73,7 @@ func (s *Server) listGmailHandler(c *gin.Context) {
 		}
 		items = append(items, item)
 	}
-	ok(c, gin.H{"count": len(items), "accounts": items})
+	ok(c, gin.H{"count": len(items), "filter": s.gmail.Filter(), "accounts": items})
 }
 
 // importGmailHandler 处理 POST /api/gmail/import。
@@ -125,19 +124,19 @@ func (s *Server) updateGmailHandler(c *gin.Context) {
 	ok(c, account)
 }
 
-// updateGmailFilterHandler 处理 PUT /api/gmail/:id/filter。
+// updateGmailFilterHandler 处理 PUT /api/gmail/filter（全局过滤，对所有邮箱生效）。
 func (s *Server) updateGmailFilterHandler(c *gin.Context) {
 	var req gmail.Filter
 	if err := c.ShouldBindJSON(&req); err != nil {
 		failCode(c, http.StatusBadRequest, "VALIDATION_ERROR", "参数错误")
 		return
 	}
-	account, err := s.gmail.SetFilter(c.Param("id"), req)
+	filter, err := s.gmail.SetFilter(req)
 	if err != nil {
 		failCode(c, http.StatusBadRequest, "VALIDATION_ERROR", err.Error())
 		return
 	}
-	ok(c, account)
+	ok(c, filter)
 }
 
 // deleteGmailHandler 处理 DELETE /api/gmail/:id,同时撤销其取件链接。
@@ -189,6 +188,38 @@ func (s *Server) createGmailShareHandler(c *gin.Context) {
 	})
 }
 
+// exportGmailShareLinksHandler 处理 POST /api/gmail/share-links。
+//
+// 为每个 Gmail 账号确保一条取件链接，并返回「账号----取件链接」文本，
+// 便于管理员一次性导出全部分发。
+func (s *Server) exportGmailShareLinksHandler(c *gin.Context) {
+	accounts, err := s.gmail.List()
+	if err != nil {
+		failCode(c, http.StatusInternalServerError, "INTERNAL_ERROR", "读取 Gmail 账号失败")
+		return
+	}
+
+	base := requestBaseURL(c)
+	items := make([]gin.H, 0, len(accounts))
+	lines := make([]string, 0, len(accounts))
+	for _, account := range accounts {
+		link, err := s.share.Ensure(gmailShareKey(account.ID), account.Email)
+		if err != nil {
+			failCode(c, http.StatusInternalServerError, "INTERNAL_ERROR", "生成取件链接失败")
+			return
+		}
+		url := base + "/?gtoken=" + link.Token
+		lines = append(lines, account.Email+"----"+url)
+		items = append(items, gin.H{"email": account.Email, "url": url, "token": link.Token})
+	}
+
+	ok(c, gin.H{
+		"count": len(items),
+		"items": items,
+		"text":  strings.Join(lines, "\n"),
+	})
+}
+
 // revokeGmailShareHandler 处理 DELETE /api/gmail/:id/share-link。
 func (s *Server) revokeGmailShareHandler(c *gin.Context) {
 	account, found := s.gmail.Get(c.Param("id"))
@@ -231,7 +262,7 @@ func (s *Server) gmailInboxHandler(c *gin.Context) {
 		"count":    len(messages),
 		"messages": messages,
 		"method":   method,
-		"filter":   account.Filter,
+		"filter":   s.gmail.Filter(),
 	})
 }
 

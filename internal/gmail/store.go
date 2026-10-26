@@ -39,7 +39,7 @@ const (
 	maxFilterDays = 90
 )
 
-// Filter 是管理员配置的取件过滤条件。
+// Filter 是管理员配置的**全局**取件过滤条件，对所有 Gmail 邮箱生效。
 //
 // 关键词按「主题或发件人包含任一关键词」命中（忽略大小写）：
 //   - Include 为空表示不限制；否则只有命中的邮件可见
@@ -59,7 +59,6 @@ type Account struct {
 	TOTPSecret  string `json:"totp_secret,omitempty"`
 	AppPassword string `json:"app_password,omitempty"`
 	Note        string `json:"note,omitempty"`
-	Filter      Filter `json:"filter"`
 	Status      string `json:"status"`
 	LastChecked string `json:"last_checked,omitempty"`
 	LastError   string `json:"last_error,omitempty"`
@@ -72,7 +71,6 @@ type Summary struct {
 	ID             string `json:"id"`
 	Email          string `json:"email"`
 	Note           string `json:"note,omitempty"`
-	Filter         Filter `json:"filter"`
 	Status         string `json:"status"`
 	HasPassword    bool   `json:"has_password"`
 	HasTOTP        bool   `json:"has_totp"`
@@ -89,7 +87,6 @@ func (a Account) Summary() Summary {
 		ID:             a.ID,
 		Email:          a.Email,
 		Note:           a.Note,
-		Filter:         a.Filter,
 		Status:         a.Status,
 		HasPassword:    a.Password != "",
 		HasTOTP:        a.TOTPSecret != "",
@@ -108,7 +105,6 @@ type Input struct {
 	TOTPSecret  string `json:"totp_secret"`
 	AppPassword string `json:"app_password"`
 	Note        string `json:"note"`
-	Filter      Filter `json:"filter"`
 }
 
 // ImportResult 是批量导入的结果。
@@ -203,13 +199,44 @@ func (s *Store) init() error {
 			updated_at   TEXT NOT NULL
 		)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_gmail_email_lower ON gmail_accounts(lower(email))`,
+		// 取件过滤是全局设置，只保留一行。
+		`CREATE TABLE IF NOT EXISTS gmail_settings (
+			id         INTEGER PRIMARY KEY CHECK (id = 1),
+			filter     TEXT NOT NULL DEFAULT '{}',
+			updated_at TEXT NOT NULL DEFAULT ''
+		)`,
 	}
 	for _, stmt := range stmts {
 		if _, err := s.db.Exec(stmt); err != nil {
 			return fmt.Errorf("初始化 Gmail 数据库失败: %w", err)
 		}
 	}
-	return nil
+	return s.migrateLegacyFilter()
+}
+
+// migrateLegacyFilter 把旧版「按账号配置」的过滤条件迁移成全局设置。
+//
+// 只在全局设置为空、且存在带条件的旧账号时执行一次，避免覆盖管理员已保存的设置。
+func (s *Store) migrateLegacyFilter() error {
+	var exists int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM gmail_settings WHERE id = 1`).Scan(&exists); err != nil {
+		return err
+	}
+	if exists > 0 {
+		return nil
+	}
+
+	var legacy string
+	_ = s.db.QueryRow(`SELECT filter FROM gmail_accounts
+		WHERE filter NOT IN ('', '{}') ORDER BY updated_at DESC LIMIT 1`).Scan(&legacy)
+	filter := decodeFilter(legacy)
+	filterJSON, err := json.Marshal(filter)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`INSERT INTO gmail_settings(id, filter, updated_at) VALUES(1, ?, ?)`,
+		string(filterJSON), time.Now().Format(time.RFC3339))
+	return err
 }
 
 // List 返回全部账号（不含密码字段），按创建时间升序。
@@ -217,7 +244,7 @@ func (s *Store) List() ([]Summary, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	rows, err := s.db.Query(`SELECT id, email, note, filter, status, password, totp_secret,
+	rows, err := s.db.Query(`SELECT id, email, note, status, password, totp_secret,
 		app_password, last_checked, last_error, created_at, updated_at
 		FROM gmail_accounts ORDER BY created_at ASC, email ASC`)
 	if err != nil {
@@ -249,7 +276,7 @@ func (s *Store) Get(id string) (Account, bool) {
 }
 
 func (s *Store) getLocked(id string) (Account, error) {
-	row := s.db.QueryRow(`SELECT id, email, note, filter, status, password, totp_secret,
+	row := s.db.QueryRow(`SELECT id, email, note, status, password, totp_secret,
 		app_password, last_checked, last_error, created_at, updated_at
 		FROM gmail_accounts WHERE id = ?`, id)
 	return scanAccountRow(row)
@@ -257,7 +284,7 @@ func (s *Store) getLocked(id string) (Account, error) {
 
 // Create 新建一条账号。
 func (s *Store) Create(in Input) (Summary, error) {
-	email, password, totp, appPassword, note, filter, err := normalize(in)
+	email, password, totp, appPassword, note, err := normalize(in)
 	if err != nil {
 		return Summary{}, err
 	}
@@ -282,7 +309,6 @@ func (s *Store) Create(in Input) (Summary, error) {
 		TOTPSecret:  totp,
 		AppPassword: appPassword,
 		Note:        note,
-		Filter:      filter,
 		Status:      "active",
 		CreatedAt:   now,
 		UpdatedAt:   now,
@@ -295,15 +321,11 @@ func (s *Store) Create(in Input) (Summary, error) {
 }
 
 func (s *Store) insertLocked(acc *Account) error {
-	filterJSON, err := json.Marshal(acc.Filter)
-	if err != nil {
-		return err
-	}
-	_, err = s.db.Exec(`INSERT INTO gmail_accounts(id, email, password, totp_secret, app_password,
-		note, filter, status, last_checked, last_error, created_at, updated_at)
-		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	_, err := s.db.Exec(`INSERT INTO gmail_accounts(id, email, password, totp_secret, app_password,
+		note, status, last_checked, last_error, created_at, updated_at)
+		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		acc.ID, acc.Email, acc.Password, acc.TOTPSecret, acc.AppPassword, acc.Note,
-		string(filterJSON), acc.Status, acc.LastChecked, acc.LastError, acc.CreatedAt, acc.UpdatedAt)
+		acc.Status, acc.LastChecked, acc.LastError, acc.CreatedAt, acc.UpdatedAt)
 	return err
 }
 
@@ -348,37 +370,52 @@ func (s *Store) Update(id string, in Input) (Summary, error) {
 		current.AppPassword = v
 	}
 	current.Note = truncate(strings.TrimSpace(in.Note), maxNoteLen)
-	if in.Filter.Include != nil || in.Filter.Exclude != nil || in.Filter.Days != 0 {
-		filter, err := normalizeFilter(in.Filter)
-		if err != nil {
-			return Summary{}, err
-		}
-		current.Filter = filter
-	}
 	current.Email = email
 	current.UpdatedAt = time.Now().Format(time.RFC3339)
 
-	filterJSON, err := json.Marshal(current.Filter)
-	if err != nil {
-		return Summary{}, err
-	}
 	if _, err := s.db.Exec(`UPDATE gmail_accounts SET email = ?, password = ?, totp_secret = ?,
-		app_password = ?, note = ?, filter = ?, updated_at = ? WHERE id = ?`,
+		app_password = ?, note = ?, updated_at = ? WHERE id = ?`,
 		current.Email, current.Password, current.TOTPSecret, current.AppPassword,
-		current.Note, string(filterJSON), current.UpdatedAt, id); err != nil {
+		current.Note, current.UpdatedAt, id); err != nil {
 		return Summary{}, err
 	}
 	s.hardenFiles()
 	return current.Summary(), nil
 }
 
-// SetFilter 只更新取件过滤条件。
-func (s *Store) SetFilter(id string, filter Filter) (Summary, error) {
+// Filter 返回全局取件过滤条件。
+func (s *Store) Filter() Filter {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var raw string
+	if err := s.db.QueryRow(`SELECT filter FROM gmail_settings WHERE id = 1`).Scan(&raw); err != nil {
+		return Filter{Include: []string{}, Exclude: []string{}}
+	}
+	return decodeFilter(raw)
+}
+
+// SetFilter 保存全局取件过滤条件（对所有 Gmail 邮箱生效）。
+func (s *Store) SetFilter(filter Filter) (Filter, error) {
 	normalized, err := normalizeFilter(filter)
 	if err != nil {
-		return Summary{}, err
+		return Filter{}, err
 	}
-	return s.Update(id, Input{Filter: normalized})
+	payload, err := json.Marshal(normalized)
+	if err != nil {
+		return Filter{}, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, err := s.db.Exec(`INSERT INTO gmail_settings(id, filter, updated_at) VALUES(1, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET filter = excluded.filter, updated_at = excluded.updated_at`,
+		string(payload), time.Now().Format(time.RFC3339)); err != nil {
+		return Filter{}, err
+	}
+	s.hardenFiles()
+	return normalized, nil
 }
 
 // Delete 删除一条账号，返回是否存在。
@@ -432,7 +469,7 @@ func (s *Store) Import(text, separator string) (ImportResult, error) {
 	defer s.mu.Unlock()
 
 	for _, line := range lines {
-		email, password, totp, appPassword, note, filter, err := normalize(Input{
+		email, password, totp, appPassword, note, err := normalize(Input{
 			Email:       line.fields[0],
 			Password:    fieldAt(line.fields, 1),
 			TOTPSecret:  fieldAt(line.fields, 2),
@@ -460,13 +497,11 @@ func (s *Store) Import(text, separator string) (ImportResult, error) {
 			if note != "" {
 				current.Note = note
 			}
-			current.Filter = filter
 			current.UpdatedAt = time.Now().Format(time.RFC3339)
-			filterJSON, _ := json.Marshal(current.Filter)
 			if _, err := s.db.Exec(`UPDATE gmail_accounts SET password = ?, totp_secret = ?,
-				app_password = ?, note = ?, filter = ?, updated_at = ? WHERE id = ?`,
+				app_password = ?, note = ?, updated_at = ? WHERE id = ?`,
 				current.Password, current.TOTPSecret, current.AppPassword, current.Note,
-				string(filterJSON), current.UpdatedAt, current.ID); err != nil {
+				current.UpdatedAt, current.ID); err != nil {
 				return ImportResult{}, err
 			}
 			result.Updated++
@@ -483,7 +518,6 @@ func (s *Store) Import(text, separator string) (ImportResult, error) {
 			TOTPSecret:  totp,
 			AppPassword: appPassword,
 			Note:        note,
-			Filter:      filter,
 			Status:      "active",
 			CreatedAt:   now,
 			UpdatedAt:   now,
@@ -499,7 +533,7 @@ func (s *Store) Import(text, separator string) (ImportResult, error) {
 }
 
 func (s *Store) getLockedByEmail(email string) (Account, error) {
-	row := s.db.QueryRow(`SELECT id, email, note, filter, status, password, totp_secret,
+	row := s.db.QueryRow(`SELECT id, email, note, status, password, totp_secret,
 		app_password, last_checked, last_error, created_at, updated_at
 		FROM gmail_accounts WHERE lower(email) = lower(?)`, email)
 	return scanAccountRow(row)
@@ -513,13 +547,11 @@ type rowScanner interface {
 
 func scanAccountRow(row rowScanner) (Account, error) {
 	var acc Account
-	var filterJSON string
-	if err := row.Scan(&acc.ID, &acc.Email, &acc.Note, &filterJSON, &acc.Status, &acc.Password,
+	if err := row.Scan(&acc.ID, &acc.Email, &acc.Note, &acc.Status, &acc.Password,
 		&acc.TOTPSecret, &acc.AppPassword, &acc.LastChecked, &acc.LastError,
 		&acc.CreatedAt, &acc.UpdatedAt); err != nil {
 		return Account{}, err
 	}
-	acc.Filter = decodeFilter(filterJSON)
 	return acc, nil
 }
 
@@ -540,16 +572,16 @@ func decodeFilter(raw string) Filter {
 	return f
 }
 
-func normalize(in Input) (email, password, totp, appPassword, note string, filter Filter, err error) {
+func normalize(in Input) (email, password, totp, appPassword, note string, err error) {
 	email = strings.TrimSpace(in.Email)
 	if email == "" {
-		return "", "", "", "", "", Filter{}, fmt.Errorf("邮箱不能为空")
+		return "", "", "", "", "", fmt.Errorf("邮箱不能为空")
 	}
 	if len([]rune(email)) > maxEmailLen {
-		return "", "", "", "", "", Filter{}, fmt.Errorf("邮箱长度超出限制")
+		return "", "", "", "", "", fmt.Errorf("邮箱长度超出限制")
 	}
 	if addr, perr := mail.ParseAddress(email); perr != nil || addr.Address != email {
-		return "", "", "", "", "", Filter{}, fmt.Errorf("邮箱地址格式无效")
+		return "", "", "", "", "", fmt.Errorf("邮箱地址格式无效")
 	}
 
 	password = strings.TrimSpace(in.Password)
@@ -564,18 +596,14 @@ func normalize(in Input) (email, password, totp, appPassword, note string, filte
 		{"应用专用密码", appPassword},
 	} {
 		if len([]rune(secret.value)) > maxSecretLen {
-			return "", "", "", "", "", Filter{}, fmt.Errorf("%s不能超过 %d 个字符", secret.name, maxSecretLen)
+			return "", "", "", "", "", fmt.Errorf("%s不能超过 %d 个字符", secret.name, maxSecretLen)
 		}
 	}
 	// Gmail 应用专用密码通常是 16 位，去掉用户粘贴时带的空格便于直接登录。
 	appPassword = strings.ReplaceAll(appPassword, " ", "")
 
 	note = truncate(strings.TrimSpace(in.Note), maxNoteLen)
-	filter, err = normalizeFilter(in.Filter)
-	if err != nil {
-		return "", "", "", "", "", Filter{}, err
-	}
-	return email, password, totp, appPassword, note, filter, nil
+	return email, password, totp, appPassword, note, nil
 }
 
 // normalizeFilter 规整过滤条件：去空白、去重、限制数量与天数。

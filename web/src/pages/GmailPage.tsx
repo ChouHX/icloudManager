@@ -21,7 +21,8 @@ import {
 import type { TableProps } from 'antd'
 import {
   DeleteOutlined,
-  EditOutlined,
+  DownloadOutlined,
+  FilterOutlined,
   InboxOutlined,
   LinkOutlined,
   ReloadOutlined,
@@ -36,6 +37,7 @@ import type {
   GmailImportResult,
   GmailListResult,
   GmailShareLink,
+  GmailShareLinksResult,
   InboxMessage,
   ShareInboxResult,
 } from '../api/types'
@@ -52,6 +54,18 @@ const IMPORT_HELP =
   '每行一条：账号----密码----2FA 密钥----应用专用密码。' +
   '缺少的中间字段留空即可（例如没有 2FA 就写成 账号----密码--------应用专用密码）；' +
   '只有账号与密码也可以。以 # 开头的行会被忽略。'
+
+/** 触发浏览器下载一个文本文件 */
+function downloadText(text: string, filename: string): void {
+  const url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }))
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}
 
 function describeFilter(filter: GmailFilter): string {
   const parts: string[] = []
@@ -182,13 +196,13 @@ function GmailImportModal({
   )
 }
 
-/** 取件过滤设置 */
+/** 全局取件过滤设置（对所有 Gmail 邮箱生效） */
 function GmailFilterModal({
-  account,
+  filter,
   onClose,
   onSaved,
 }: {
-  account: GmailAccount | null
+  filter: GmailFilter | null
   onClose: () => void
   onSaved: () => void
 }) {
@@ -197,7 +211,7 @@ function GmailFilterModal({
   const [saving, setSaving] = useState(false)
 
   async function handleSave() {
-    if (!account) return
+    if (!filter) return
     let values: GmailFilter
     try {
       values = await form.validateFields()
@@ -207,7 +221,7 @@ function GmailFilterModal({
     setSaving(true)
     setError('')
     try {
-      await request(`/api/gmail/${encodeURIComponent(account.id)}/filter`, {
+      await request('/api/gmail/filter', {
         method: 'PUT',
         body: {
           include: values.include ?? [],
@@ -226,8 +240,9 @@ function GmailFilterModal({
 
   return (
     <Modal
-      open={account !== null}
-      title={account ? `取件过滤 · ${account.email}` : '取件过滤'}
+      open={filter !== null}
+      title="全局取件过滤（对所有 Gmail 邮箱生效）"
+      width={560}
       onCancel={onClose}
       onOk={() => void handleSave()}
       okText="保存"
@@ -241,8 +256,8 @@ function GmailFilterModal({
         layout="vertical"
         preserve={false}
         initialValues={
-          account
-            ? { include: account.filter.include, exclude: account.filter.exclude, days: account.filter.days }
+          filter
+            ? { include: filter.include, exclude: filter.exclude, days: filter.days }
             : { include: [], exclude: [], days: 0 }
         }
       >
@@ -267,9 +282,11 @@ function GmailFilterModal({
 /** 管理员预览：应用与取件链接相同的过滤条件 */
 function GmailInboxDrawer({
   account,
+  filter,
   onClose,
 }: {
   account: GmailAccount | null
+  filter: GmailFilter
   onClose: () => void
 }) {
   const [days, setDays] = useState(7)
@@ -341,7 +358,7 @@ function GmailInboxDrawer({
     >
       {account && (
         <Typography.Paragraph type="secondary" style={{ fontSize: 12 }}>
-          过滤条件：{describeFilter(account.filter)}
+          全局过滤条件：{describeFilter(filter)}
         </Typography.Paragraph>
       )}
       {error && <Alert type="error" showIcon title={error} style={{ marginBottom: 12 }} />}
@@ -379,11 +396,16 @@ export default function GmailPage() {
   const { message } = AntdApp.useApp()
   const { data, loading, error, reload } = useFetch<GmailListResult>('/api/gmail')
   const [importOpen, setImportOpen] = useState(false)
-  const [filterTarget, setFilterTarget] = useState<GmailAccount | null>(null)
+  const [filterOpen, setFilterOpen] = useState(false)
   const [previewTarget, setPreviewTarget] = useState<GmailAccount | null>(null)
   const [busyId, setBusyId] = useState('')
+  const [exporting, setExporting] = useState(false)
 
   const accounts = useMemo(() => data?.accounts ?? [], [data])
+  const globalFilter = useMemo<GmailFilter>(
+    () => data?.filter ?? { include: [], exclude: [], days: 0 },
+    [data],
+  )
 
   async function handleShare(account: GmailAccount) {
     setBusyId(account.id)
@@ -404,6 +426,20 @@ export default function GmailPage() {
       message.error(err instanceof ApiError ? err.message : '生成取件链接失败')
     } finally {
       setBusyId('')
+    }
+  }
+
+  async function handleExportLinks() {
+    setExporting(true)
+    try {
+      const res = await request<GmailShareLinksResult>('/api/gmail/share-links', { method: 'POST' })
+      downloadText(res.text, `gmail-share-links-${new Date().toISOString().slice(0, 10)}.txt`)
+      message.success(`已导出 ${res.count} 条取件链接`)
+      reload()
+    } catch (err) {
+      message.error(err instanceof ApiError ? err.message : '导出取件链接失败')
+    } finally {
+      setExporting(false)
     }
   }
 
@@ -467,14 +503,6 @@ export default function GmailPage() {
       ),
     },
     {
-      title: '取件过滤',
-      dataIndex: 'filter',
-      width: 260,
-      render: (filter: GmailFilter) => (
-        <Typography.Text style={{ fontSize: 12 }}>{describeFilter(filter)}</Typography.Text>
-      ),
-    },
-    {
       title: '取件链接',
       dataIndex: 'share_token',
       width: 200,
@@ -512,9 +540,6 @@ export default function GmailPage() {
         <Space size={4} wrap>
           <Button size="small" icon={<InboxOutlined />} onClick={() => setPreviewTarget(record)}>
             预览
-          </Button>
-          <Button size="small" icon={<EditOutlined />} onClick={() => setFilterTarget(record)}>
-            过滤
           </Button>
           {record.share_token ? (
             <Button size="small" danger loading={busyId === record.id} onClick={() => void handleRevoke(record)}>
@@ -559,7 +584,18 @@ export default function GmailPage() {
             <strong>符合过滤条件</strong>的邮件。
           </p>
         </div>
-        <Space>
+        <Space wrap>
+          <Button icon={<FilterOutlined />} onClick={() => setFilterOpen(true)}>
+            全局过滤
+          </Button>
+          <Button
+            icon={<DownloadOutlined />}
+            loading={exporting}
+            disabled={accounts.length === 0}
+            onClick={() => void handleExportLinks()}
+          >
+            导出全部链接
+          </Button>
           <Button icon={<ReloadOutlined />} onClick={reload} loading={loading}>
             刷新
           </Button>
@@ -583,7 +619,10 @@ export default function GmailPage() {
         />
       )}
 
-      <Card variant="borderless">
+      <Card
+        variant="borderless"
+        title={`账号列表 · 全局过滤：${describeFilter(globalFilter)}`}
+      >
         {accounts.length === 0 && !loading ? (
           <Empty description="还没有 Gmail 账号，先批量导入一批" />
         ) : (
@@ -604,14 +643,18 @@ export default function GmailPage() {
         onImported={reload}
       />
       <GmailFilterModal
-        account={filterTarget}
-        onClose={() => setFilterTarget(null)}
+        filter={filterOpen ? globalFilter : null}
+        onClose={() => setFilterOpen(false)}
         onSaved={() => {
-          message.success('取件过滤已保存')
+          message.success('全局取件过滤已保存')
           reload()
         }}
       />
-      <GmailInboxDrawer account={previewTarget} onClose={() => setPreviewTarget(null)} />
+      <GmailInboxDrawer
+        account={previewTarget}
+        filter={globalFilter}
+        onClose={() => setPreviewTarget(null)}
+      />
 
       <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginTop: 16 }}>
         取件链接格式：<code>/?gtoken=…</code>，只能读取该邮箱过滤后的邮件，无法访问账号设置或其它邮箱。

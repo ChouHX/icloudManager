@@ -84,7 +84,8 @@ func (s *Store) Inbox(id string, limit, days int) ([]mail.Message, string, error
 	if limit > maxFetchLimit {
 		limit = maxFetchLimit
 	}
-	days = effectiveDays(acc.Filter, days)
+	filter := s.Filter()
+	days = effectiveDays(filter, days)
 
 	fetch := limit * fetchFactor
 	if fetch > maxFetchLimit {
@@ -107,7 +108,7 @@ func (s *Store) Inbox(id string, limit, days int) ([]mail.Message, string, error
 
 	visible := make([]mail.Message, 0, limit)
 	for _, message := range messages {
-		if !acc.Filter.Match(message) {
+		if !filter.Match(message) {
 			continue
 		}
 		visible = append(visible, message)
@@ -141,7 +142,7 @@ func (s *Store) Message(id string, uid uint32, opts mail.MessageOptions) (*mail.
 	}
 	// IMAP UID 是账号级全局编号，必须逐封核对过滤条件，
 	// 否则拿到取件链接的人可以猜 UID 读到范围外的邮件。
-	if !acc.Filter.MatchMessage(message) {
+	if !s.Filter().MatchMessage(message) {
 		return nil, ErrFiltered
 	}
 	return message, nil
