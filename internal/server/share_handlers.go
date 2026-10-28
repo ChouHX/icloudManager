@@ -5,6 +5,7 @@
 package server
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -179,6 +180,15 @@ func (s *Server) shareMessageHandler(c *gin.Context) {
 
 	message.To = link.Alias // 只回显该别名,不暴露账号其它地址
 	ok(c, message)
+}
+
+// parseMessageUID 解析邮件 ID(当前的文件夹内 IMAP UID,不可为 0)。
+func parseMessageUID(raw string) (uint32, error) {
+	uid, err := strconv.ParseUint(strings.TrimSpace(raw), 10, 32)
+	if err != nil || uid == 0 {
+		return 0, fmt.Errorf("邮件 ID 无效")
+	}
+	return uint32(uid), nil
 }
 
 // messageBelongsToAlias 判断邮件是否发给指定别名。

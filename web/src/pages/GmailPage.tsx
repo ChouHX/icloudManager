@@ -305,8 +305,9 @@ function GmailInboxDrawer({
     setDetailLoading(true)
     setDetailError('')
     try {
+      const folder = record.folder ? `?folder=${encodeURIComponent(record.folder)}` : ''
       const full = await request<FullMessage>(
-        `/api/gmail/${encodeURIComponent(account.id)}/inbox/${encodeURIComponent(record.id)}`,
+        `/api/gmail/${encodeURIComponent(account.id)}/inbox/${encodeURIComponent(record.id)}${folder}`,
       )
       setDetail(full)
     } catch (err) {
@@ -322,9 +323,16 @@ function GmailInboxDrawer({
       dataIndex: 'subject',
       ellipsis: true,
       render: (subject: string, record) => (
-        <Button type="link" size="small" style={{ padding: 0 }} onClick={() => void openMessage(record)}>
-          {subject || '（无主题）'}
-        </Button>
+        <>
+          {record.folder && record.folder !== 'INBOX' && (
+            <Tag color="orange" style={{ marginInlineEnd: 6 }}>
+              垃圾邮件
+            </Tag>
+          )}
+          <Button type="link" size="small" style={{ padding: 0 }} onClick={() => void openMessage(record)}>
+            {subject || '（无主题）'}
+          </Button>
+        </>
       ),
     },
     { title: '发件人', dataIndex: 'from', width: 200, ellipsis: true },
@@ -369,7 +377,7 @@ function GmailInboxDrawer({
         </div>
       ) : (
         <Table<InboxMessage>
-          rowKey="id"
+          rowKey={(record) => `${record.folder ?? 'INBOX'}:${record.id}`}
           size="small"
           columns={columns}
           dataSource={data?.messages ?? []}

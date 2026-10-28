@@ -120,7 +120,7 @@ func (s *Store) Inbox(id string, limit, days int) ([]mail.Message, string, error
 }
 
 // Message 读取指定账号的一封邮件，并校验是否在过滤范围内。
-func (s *Store) Message(id string, uid uint32, opts mail.MessageOptions) (*mail.FullMessage, error) {
+func (s *Store) Message(id, folder string, uid uint32, opts mail.MessageOptions) (*mail.FullMessage, error) {
 	acc, ok := s.Get(id)
 	if !ok {
 		return nil, fmt.Errorf("账号不存在")
@@ -136,7 +136,7 @@ func (s *Store) Message(id string, uid uint32, opts mail.MessageOptions) (*mail.
 	}
 	defer cli.Disconnect()
 
-	message, err := cli.GetFull(uid, opts)
+	message, err := cli.GetFull(folder, uid, opts)
 	if err != nil {
 		return nil, err
 	}

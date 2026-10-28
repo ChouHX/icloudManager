@@ -273,7 +273,7 @@ func (s *Server) gmailMessageHandler(c *gin.Context) {
 		failCode(c, http.StatusBadRequest, "VALIDATION_ERROR", "邮件 ID 无效")
 		return
 	}
-	message, err := s.gmail.Message(c.Param("id"), uid, mail.MessageOptions{Sanitize: true})
+	message, err := s.gmail.Message(c.Param("id"), strings.TrimSpace(c.Query("folder")), uid, mail.MessageOptions{Sanitize: true})
 	if err != nil {
 		gmailError(c, err)
 		return
@@ -325,7 +325,7 @@ func (s *Server) shareGmailMessageHandler(c *gin.Context) {
 		return
 	}
 
-	message, err := s.gmail.Message(accountID, uid, mail.MessageOptions{Sanitize: true})
+	message, err := s.gmail.Message(accountID, strings.TrimSpace(c.Query("folder")), uid, mail.MessageOptions{Sanitize: true})
 	if err != nil {
 		gmailError(c, err)
 		return
