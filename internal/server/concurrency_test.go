@@ -35,7 +35,7 @@ func (b *threadSafeBackend) ListInbox(q InboxQuery) (InboxResult, error) {
 	}, nil
 }
 
-func (b *threadSafeBackend) GetMessage(accountID string, uid uint32, _ mail.MessageOptions) (*mail.FullMessage, error) {
+func (b *threadSafeBackend) GetMessage(accountID, folder string, uid uint32, _ mail.MessageOptions) (*mail.FullMessage, error) {
 	atomic.AddInt64(&b.messageCalls, 1)
 	return &mail.FullMessage{
 		Message:     mail.Message{ID: "1042", Subject: "并发测试"},
@@ -44,7 +44,7 @@ func (b *threadSafeBackend) GetMessage(accountID string, uid uint32, _ mail.Mess
 	}, nil
 }
 
-func (b *threadSafeBackend) DeleteMessage(accountID string, uid uint32) error {
+func (b *threadSafeBackend) DeleteMessage(accountID, folder string, uid uint32) error {
 	atomic.AddInt64(&b.deleteCalls, 1)
 	return nil
 }

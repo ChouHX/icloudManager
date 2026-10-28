@@ -91,8 +91,9 @@ export default function InboxPage() {
     setDetailLoading(true)
     try {
       // sanitize=1:额外取一份清理后的 HTML,界面用这份渲染(原始版仍在 body_html 里)
+      const folder = record.folder ? `&folder=${encodeURIComponent(record.folder)}` : ''
       const full = await request<FullMessage>(
-        `/api/inbox/${encodeURIComponent(record.id)}?account_id=${encodeURIComponent(accountId)}&sanitize=1`,
+        `/api/inbox/${encodeURIComponent(record.id)}?account_id=${encodeURIComponent(accountId)}${folder}&sanitize=1`,
       )
       setDetail(full)
     } catch (err) {
@@ -105,8 +106,9 @@ export default function InboxPage() {
   async function deleteMessage(target: InboxMessage | FullMessage) {
     setDeleting(true)
     try {
+      const folder = target.folder ? `&folder=${encodeURIComponent(target.folder)}` : ''
       await request(
-        `/api/inbox/${encodeURIComponent(target.id)}?account_id=${encodeURIComponent(accountId)}`,
+        `/api/inbox/${encodeURIComponent(target.id)}?account_id=${encodeURIComponent(accountId)}${folder}`,
         { method: 'DELETE' },
       )
       setDetail(null)
@@ -131,15 +133,22 @@ export default function InboxPage() {
       dataIndex: 'subject',
       ellipsis: true,
       render: (subject: string, record) => (
-        <Button
-          type="link"
-          size="small"
-          title={subject || '（无主题）'}
-          style={{ padding: 0, maxWidth: '100%', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', textAlign: 'left' }}
-          onClick={() => void openMessage(record)}
-        >
-          {subject || '（无主题）'}
-        </Button>
+        <>
+          {record.folder && record.folder !== 'INBOX' && (
+            <Tag color="orange" style={{ marginInlineEnd: 6 }}>
+              垃圾邮件
+            </Tag>
+          )}
+          <Button
+            type="link"
+            size="small"
+            title={subject || '（无主题）'}
+            style={{ padding: 0, maxWidth: '100%', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', textAlign: 'left' }}
+            onClick={() => void openMessage(record)}
+          >
+            {subject || '（无主题）'}
+          </Button>
+        </>
       ),
     },
     {
@@ -269,7 +278,7 @@ export default function InboxPage() {
       >
         {error && <Alert type="error" showIcon title={error} style={{ marginBottom: 16 }} />}
         <Table<InboxMessage>
-          rowKey="id"
+          rowKey={(record) => `${record.folder ?? 'INBOX'}:${record.id}`}
           columns={columns}
           dataSource={data?.messages ?? []}
           loading={loading}

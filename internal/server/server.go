@@ -330,12 +330,14 @@ func (s *Server) getMessageHandler(c *gin.Context) {
 		failCode(c, http.StatusBadRequest, "VALIDATION_ERROR", "account_id 或邮件 ID 无效")
 		return
 	}
+	// folder 为空时按收件箱处理;垃圾邮件等其它文件夹由列表返回。
+	folder := strings.TrimSpace(c.Query("folder"))
 	// sanitize=1 额外返回清理后的 HTML;raw=1 额外返回完整 RFC822 报文
 	opts := mail.MessageOptions{
 		Sanitize:   queryBool(c, "sanitize"),
 		IncludeRaw: queryBool(c, "raw"),
 	}
-	message, err := s.be.GetMessage(accountID, uint32(uid), opts)
+	message, err := s.be.GetMessage(accountID, folder, uint32(uid), opts)
 	if err != nil {
 		backendFail(c, err)
 		return
@@ -360,7 +362,8 @@ func (s *Server) deleteMessageHandler(c *gin.Context) {
 		failCode(c, http.StatusBadRequest, "VALIDATION_ERROR", "account_id 或邮件 ID 无效")
 		return
 	}
-	if err := s.be.DeleteMessage(accountID, uint32(uid)); err != nil {
+	folder := strings.TrimSpace(c.Query("folder"))
+	if err := s.be.DeleteMessage(accountID, folder, uint32(uid)); err != nil {
 		backendFail(c, err)
 		return
 	}

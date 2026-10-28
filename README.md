@@ -184,7 +184,7 @@ curl -b jar.txt -X DELETE "http://localhost:8081/api/inbox/1042?account_id=acc_1
 
 - **Cookie**(创建别名必需) — 浏览器登录 [icloud.com](https://www.icloud.com) 或 [icloud.com.cn](https://www.icloud.com.cn),导出 Cookie 后粘贴到「账号设置 → 更新 Cookie」,有效期约 24 小时。关键字段 `X-APPLE-WEBAUTH-TOKEN`、`X-APPLE-WEBAUTH-USER`、`X-APPLE-WEBAUTH-HSA-TRUST`、`X-APPLE-DS-WEB-SESSION-TOKEN`
 - **App 专用密码**(取件首选) — 在 [appleid.apple.com](https://appleid.apple.com) 生成,走 IMAP,支持按收件人搜索与时间范围过滤
-- **外部收件邮箱**(备选) — 接入 QQ / Gmail / Outlook 的 IMAP,无需暴露 iCloud 凭据
+- **外部收件邮箱**(备选) — 接入 QQ / Gmail / Outlook 的 IMAP,无需暴露 iCloud 凭据;取件会连同垃圾邮件文件夹一起读取
 
 取件时服务端按 `外部收件邮箱 → App 专用密码(IMAP) → Cookie(Web API)` 的顺序选择可用凭据。
 ## 项目架构

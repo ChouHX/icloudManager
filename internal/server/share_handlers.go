@@ -5,7 +5,6 @@
 package server
 
 import (
-	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -157,13 +156,14 @@ func (s *Server) shareMessageHandler(c *gin.Context) {
 		return
 	}
 
-	uid, err := parseMessageUID(c.Param("message_id"))
-	if err != nil {
+	uid, err := strconv.ParseUint(strings.TrimSpace(c.Param("message_id")), 10, 32)
+	if err != nil || uid == 0 {
 		failCode(c, http.StatusBadRequest, "VALIDATION_ERROR", "邮件 ID 无效")
 		return
 	}
+	folder := strings.TrimSpace(c.Query("folder"))
 
-	message, err := s.be.GetMessage(link.AccountID, uid, mail.MessageOptions{Sanitize: true})
+	message, err := s.be.GetMessage(link.AccountID, folder, uint32(uid), mail.MessageOptions{Sanitize: true})
 	if err != nil {
 		backendFail(c, err)
 		return
@@ -194,13 +194,4 @@ func messageBelongsToAlias(message *mail.FullMessage, alias string) bool {
 		return false
 	}
 	return strings.Contains(strings.ToLower(message.To), target)
-}
-
-// parseMessageUID 解析邮件 ID(IMAP UID,不可为 0)。
-func parseMessageUID(raw string) (uint32, error) {
-	uid, err := strconv.ParseUint(strings.TrimSpace(raw), 10, 32)
-	if err != nil || uid == 0 {
-		return 0, fmt.Errorf("邮件 ID 无效")
-	}
-	return uint32(uid), nil
 }

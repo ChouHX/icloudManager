@@ -157,6 +157,8 @@ export interface CreateAliasResult {
 /** 邮件摘要 */
 export interface InboxMessage {
   id: string
+  /** 邮件所在 IMAP 文件夹（收件箱为 INBOX，垃圾邮件为服务端文件夹名） */
+  folder?: string
   from: string
   to: string
   subject: string

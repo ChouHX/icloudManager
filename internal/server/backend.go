@@ -57,8 +57,8 @@ type Backend interface {
 	SetAliasActive(string, string, bool) (bool, error)
 	DeleteAlias(string, string) error
 	ListInbox(InboxQuery) (InboxResult, error)
-	GetMessage(string, uint32, mail.MessageOptions) (*mail.FullMessage, error)
-	DeleteMessage(string, uint32) error
+	GetMessage(string, string, uint32, mail.MessageOptions) (*mail.FullMessage, error)
+	DeleteMessage(string, string, uint32) error
 	Reload() error
 }
 
@@ -337,11 +337,11 @@ func (b *managerBackend) ListInbox(q InboxQuery) (InboxResult, error) {
 //
 // 与列表一致地走 IMAP 连接池:同账号的多个读信请求各占一条连接并行执行,
 // 复用长连接可以省掉每次 TLS + LOGIN 的开销。
-func (b *managerBackend) GetMessage(accountID string, uid uint32, opts mail.MessageOptions) (*mail.FullMessage, error) {
+func (b *managerBackend) GetMessage(accountID, folder string, uid uint32, opts mail.MessageOptions) (*mail.FullMessage, error) {
 	var message *mail.FullMessage
 	err := b.mgr.WithMailClient(accountID, func(mc *mail.Client) error {
 		var inner error
-		message, inner = mc.GetFull(uid, opts)
+		message, inner = mc.GetFull(folder, uid, opts)
 		return inner
 	})
 	if err != nil {
@@ -354,9 +354,9 @@ func (b *managerBackend) GetMessage(accountID string, uid uint32, opts mail.Mess
 }
 
 // DeleteMessage 删除邮件,同样复用池中的长连接。
-func (b *managerBackend) DeleteMessage(accountID string, uid uint32) error {
+func (b *managerBackend) DeleteMessage(accountID, folder string, uid uint32) error {
 	err := b.mgr.WithMailClient(accountID, func(mc *mail.Client) error {
-		return mc.Delete(uid)
+		return mc.Delete(folder, uid)
 	})
 	if err != nil {
 		if isMailCredentialErr(err) {

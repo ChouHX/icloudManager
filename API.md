@@ -242,7 +242,7 @@ Content-Type: application/json
 }
 ```
 
-`GET /api/share/:token/inbox/:id` 返回与 `/api/inbox/:id` 相同的正文字段（`body` / `body_html` / `body_html_sanitized` / `content_type`）。
+`GET /api/share/:token/inbox/:id` 返回与 `/api/inbox/:id` 相同的正文字段（`body` / `body_html` / `body_html_sanitized` / `content_type`）。与后者一样支持 `folder` 查询参数，读取垃圾邮件时必须带上列表返回的 `folder`。
 
 安全约定：
 
@@ -391,6 +391,8 @@ GET /api/inbox?account_id=acc_1a2b3c4d&alias=xyz123@icloud.com&limit=20&days=7
 
 `limit` / `days` 传入非整数或越界值直接返回 `400 VALIDATION_ERROR`；注意查询串里写了空值（如 `?limit=`）也按非法处理，不会回落默认值。
 
+IMAP 路径会同时读取**收件箱与垃圾邮件文件夹**（按 SPECIAL-USE 的 `\Junk` / `\Spam` 属性识别，Gmail 等不声明属性的服务端按常见文件夹名兜底），合并后按时间倒序取前 `limit` 封。垃圾邮件文件夹不可用时只跳过该文件夹，不影响收件箱。响应中的 `folder` 字段标明邮件所在文件夹，`INBOX` 为收件箱，其余为服务端返回的文件夹名。
+
 响应：
 
 ```json
@@ -404,6 +406,7 @@ GET /api/inbox?account_id=acc_1a2b3c4d&alias=xyz123@icloud.com&limit=20&days=7
     "messages": [
       {
         "id": "1042",
+        "folder": "INBOX",
         "from": "GitHub <noreply@github.com>",
         "to": "xyz123@icloud.com",
         "subject": "[GitHub] Please verify your email address",
@@ -425,11 +428,12 @@ GET /api/inbox?account_id=acc_1a2b3c4d&alias=xyz123@icloud.com&limit=20&days=7
 ### 4.2 读取邮件正文
 
 ```http
-GET /api/inbox/1042?account_id=acc_1a2b3c4d[&sanitize=1][&raw=1]
+GET /api/inbox/1042?account_id=acc_1a2b3c4d[&folder=[Gmail]/Spam][&sanitize=1][&raw=1]
 ```
 
 | 查询参数 | 说明 |
 |---|---|
+| `folder` | 邮件所在文件夹；省略或为空时按收件箱（`INBOX`）处理，列表返回的 `folder` 原样传回即可 |
 | `sanitize` | `1` / `true` / `yes` 时额外返回清理后的 HTML（`body_html_sanitized`） |
 | `raw` | `1` / `true` / `yes` 时额外返回完整 RFC822 报文（`raw_message`，base64） |
 
@@ -452,7 +456,7 @@ GET /api/inbox/1042?account_id=acc_1a2b3c4d[&sanitize=1][&raw=1]
 }
 ```
 
-`:message_id` 是 IMAP UID（十进制整数，不可为 0），仅在 `method: "imap"` 下可用 —— 见 6.1。
+`:message_id` 是当前文件夹内的 IMAP UID（十进制整数，不可为 0），仅在 `method: "imap"` 下可用 —— 见 6.1。不同文件夹的 UID 相互独立，所以读取垃圾邮件等非收件箱邮件时必须带上列表返回的 `folder`；文件夹名可能含 `/`（如 `[Gmail]/Spam`），请放在查询参数里而不是路径中。
 
 | 字段 | 说明 |
 |---|---|
@@ -472,7 +476,7 @@ GET /api/inbox/1042?account_id=acc_1a2b3c4d[&sanitize=1][&raw=1]
 ### 4.3 删除邮件
 
 ```http
-DELETE /api/inbox/1042?account_id=acc_1a2b3c4d
+DELETE /api/inbox/1042?account_id=acc_1a2b3c4d[&folder=[Gmail]/Spam]
 X-CSRF-Token: <token>
 ```
 
@@ -480,7 +484,7 @@ X-CSRF-Token: <token>
 { "success": true, "data": { "id": "1042" } }
 ```
 
-邮件从收件箱永久删除，同样只在 IMAP 路径可用。
+邮件从 `folder` 指定的文件夹永久删除（省略时为收件箱），同样只在 IMAP 路径可用。
 
 ---
 

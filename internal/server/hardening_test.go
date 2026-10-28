@@ -128,3 +128,37 @@ func TestGetMessageOptionsArePassedThrough(t *testing.T) {
 		}
 	}
 }
+
+// TestMessageFolderIsPassedThrough 验证 folder 查询参数被传给邮件层。
+//
+// 垃圾邮件文件夹名(如 [Gmail]/Spam)包含斜杠,只能走查询参数而不是路径,
+// 否则路由匹配不到 message_id。
+func TestMessageFolderIsPassedThrough(t *testing.T) {
+	f := &fakeBackend{}
+	s := mustServer(t, f, Config{AdminPassword: "admin-pass-2026-strong", SessionTTL: time.Hour})
+	ts := httptest.NewServer(s.Handler())
+	defer ts.Close()
+
+	sess, csrf := login(t, ts, "admin-pass-2026-strong")
+
+	req := authedReq(t, ts, "GET", "/api/inbox/1042?account_id=acc_1&folder=%5BGmail%5D%2FSpam", "")
+	req.AddCookie(&http.Cookie{Name: "hme_session", Value: sess})
+	status, body, _ := do(t, req)
+	if status != http.StatusOK {
+		t.Fatalf("期望 200,得到 %d: %s", status, body)
+	}
+	if f.lastMessageFolder != "[Gmail]/Spam" {
+		t.Fatalf("folder 未传到邮件层,得到 %q", f.lastMessageFolder)
+	}
+
+	req = authedReq(t, ts, "DELETE", "/api/inbox/1042?account_id=acc_1&folder=%5BGmail%5D%2FSpam", "")
+	req.AddCookie(&http.Cookie{Name: "hme_session", Value: sess})
+	req.Header.Set("X-CSRF-Token", csrf)
+	status, body, _ = do(t, req)
+	if status != http.StatusOK {
+		t.Fatalf("删除期望 200,得到 %d: %s", status, body)
+	}
+	if f.lastDeleteFolder != "[Gmail]/Spam" {
+		t.Fatalf("删除时 folder 未传到邮件层,得到 %q", f.lastDeleteFolder)
+	}
+}

@@ -54,7 +54,9 @@ type fakeBackend struct {
 	// 多账号任务会并发调用,计数器必须是原子的
 	createAliasCalls atomic.Int64
 	// 记录最近一次 GetMessage 的选项,用于断言查询参数的传递
-	lastMessageOpts mail.MessageOptions
+	lastMessageOpts   mail.MessageOptions
+	lastMessageFolder string
+	lastDeleteFolder  string
 	// fullMessage 非空时由 GetMessage 返回,便于构造越权等场景
 	fullMessage *mail.FullMessage
 
@@ -175,15 +177,19 @@ func (f *fakeBackend) ListInbox(q InboxQuery) (InboxResult, error) {
 	return f.inbox, nil
 }
 
-func (f *fakeBackend) GetMessage(accountID string, uid uint32, opts mail.MessageOptions) (*mail.FullMessage, error) {
+func (f *fakeBackend) GetMessage(accountID, folder string, uid uint32, opts mail.MessageOptions) (*mail.FullMessage, error) {
 	f.lastMessageOpts = opts
+	f.lastMessageFolder = folder
 	if f.fullMessage != nil {
 		return f.fullMessage, nil
 	}
 	return &mail.FullMessage{Message: mail.Message{ID: fmt.Sprint(uid)}}, nil
 }
 
-func (f *fakeBackend) DeleteMessage(accountID string, uid uint32) error { return nil }
+func (f *fakeBackend) DeleteMessage(accountID, folder string, uid uint32) error {
+	f.lastDeleteFolder = folder
+	return nil
+}
 
 func (f *fakeBackend) Reload() error {
 	f.reloadCount++

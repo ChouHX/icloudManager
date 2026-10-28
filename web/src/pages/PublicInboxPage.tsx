@@ -54,8 +54,9 @@ export default function PublicInboxPage({
     setDetailLoading(true)
     setDetailError('')
     try {
+      const folder = record.folder ? `?folder=${encodeURIComponent(record.folder)}` : ''
       const full = await request<FullMessage>(
-        `${base}/${encodeURIComponent(record.id)}`,
+        `${base}/${encodeURIComponent(record.id)}${folder}`,
       )
       setDetail(full)
     } catch (err) {
@@ -71,15 +72,22 @@ export default function PublicInboxPage({
       dataIndex: 'subject',
       ellipsis: true,
       render: (subject: string, record) => (
-        <Button
-          type="link"
-          size="small"
-          title={subject || '（无主题）'}
-          style={{ padding: 0, maxWidth: '100%', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', textAlign: 'left' }}
-          onClick={() => void openMessage(record)}
-        >
-          {subject || '（无主题）'}
-        </Button>
+        <>
+          {record.folder && record.folder !== 'INBOX' && (
+            <Tag color="orange" style={{ marginInlineEnd: 6 }}>
+              垃圾邮件
+            </Tag>
+          )}
+          <Button
+            type="link"
+            size="small"
+            title={subject || '（无主题）'}
+            style={{ padding: 0, maxWidth: '100%', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', textAlign: 'left' }}
+            onClick={() => void openMessage(record)}
+          >
+            {subject || '（无主题）'}
+          </Button>
+        </>
       ),
     },
     { title: '发件人', dataIndex: 'from', width: 220, ellipsis: true },
@@ -159,7 +167,7 @@ export default function PublicInboxPage({
             </div>
           ) : (
             <Table<InboxMessage>
-              rowKey="id"
+              rowKey={(record) => `${record.folder ?? 'INBOX'}:${record.id}`}
               columns={columns}
               dataSource={data?.messages ?? []}
               loading={loading}
