@@ -86,6 +86,10 @@ export interface GmailAccount {
   has_password: boolean
   has_totp: boolean
   has_app_password: boolean
+  /** 2FA 密钥（管理端列表展示） */
+  totp_secret?: string
+  /** 应用专用密码（管理端列表展示） */
+  app_password?: string
   last_checked?: string
   last_error?: string
   created_at: string

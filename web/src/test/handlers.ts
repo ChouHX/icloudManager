@@ -120,6 +120,8 @@ export const GMAIL_ACCOUNTS = [
     has_password: true,
     has_totp: true,
     has_app_password: true,
+    totp_secret: 'JBSWY3DPEHPK3PXP',
+    app_password: 'abcdefghijklmnop',
     last_checked: '2026-10-26T09:00:00+08:00',
     last_error: '',
     created_at: '2026-10-20T09:00:00+08:00',

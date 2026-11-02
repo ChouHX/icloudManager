@@ -13,10 +13,16 @@ describe('GmailPage', () => {
     renderGmail()
 
     expect(await screen.findByText('mail@gmail.com')).toBeInTheDocument()
-    expect(screen.getByText('已配应用密码')).toBeInTheDocument()
+    // 2FA 密钥与应用专用密码直接展示
+    expect(screen.getByText('2FA 密钥')).toBeInTheDocument()
+    expect(screen.getByText('JBSWY3DPEHPK3PXP')).toBeInTheDocument()
+    expect(screen.getByText('应用专用密码')).toBeInTheDocument()
+    expect(screen.getByText('abcdefghijklmnop')).toBeInTheDocument()
     // 过滤条件是全局的，展示在列表标题上
     expect(screen.getByText(/账号列表 · 全局过滤：仅含 验证码/)).toBeInTheDocument()
-    expect(screen.getByText('未生成')).toBeInTheDocument()
+    // 操作收进下拉菜单，不再单独占用取件链接列
+    expect(screen.getByRole('button', { name: /操作/ })).toBeInTheDocument()
+    expect(screen.queryByText('取件链接', { selector: 'th' })).not.toBeInTheDocument()
   })
 
   it('批量导入账号', async () => {
@@ -59,12 +65,13 @@ describe('GmailPage', () => {
     expect(await screen.findByText('已导出 1 条取件链接')).toBeInTheDocument()
   })
 
-  it('生成取件链接', async () => {
+  it('从操作菜单生成并复制取件链接', async () => {
     const user = userEvent.setup()
     renderGmail()
     await screen.findByText('mail@gmail.com')
 
-    await user.click(screen.getByRole('button', { name: /生成链接/ }))
+    await user.click(screen.getByRole('button', { name: /操作/ }))
+    await user.click(await screen.findByText('生成并复制链接'))
     expect(await screen.findByText(/取件链接已生成/)).toBeInTheDocument()
   })
 })

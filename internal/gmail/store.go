@@ -4,8 +4,9 @@
 // （`账号----密码----2FA 密钥----应用专用密码`），凭应用专用密码通过
 // imap.gmail.com 读取收件箱，再按管理员配置的过滤条件决定对外可见的邮件。
 //
-// 持久化到 dataDir/gmail.db（纯 Go SQLite，文件权限 0600），
-// 密码类字段只写不读：对外一律通过 Summary 暴露布尔标记。
+// 持久化到 dataDir/gmail.db（纯 Go SQLite，文件权限 0600）。
+// 登录密码只写不读；2FA 密钥与应用专用密码仅通过 ListDetailed 提供给
+// 管理端列表，取件等对外场景仍只使用 Summary 的布尔标记。
 package gmail
 
 import (
@@ -62,7 +63,7 @@ type Account struct {
 	UpdatedAt   string `json:"updated_at"`
 }
 
-// Summary 是对外暴露的账号信息，不含任何密码字段。
+// Summary 是对外暴露的账号信息，不含登录密码字段。
 type Summary struct {
 	ID             string `json:"id"`
 	Email          string `json:"email"`
@@ -92,6 +93,15 @@ func (a Account) Summary() Summary {
 		CreatedAt:      a.CreatedAt,
 		UpdatedAt:      a.UpdatedAt,
 	}
+}
+
+// DetailedSummary 在 Summary 基础上带上 2FA 密钥与应用专用密码。
+//
+// 仅供管理端账号列表展示；取件链接等对外场景必须继续使用 Summary。
+type DetailedSummary struct {
+	Summary
+	TOTPSecret  string `json:"totp_secret"`
+	AppPassword string `json:"app_password"`
 }
 
 // Input 是创建/更新账号的输入。密码类字段留空表示「不修改」。
@@ -237,6 +247,35 @@ func (s *Store) migrateLegacyFilter() error {
 
 // List 返回全部账号（不含密码字段），按创建时间升序。
 func (s *Store) List() ([]Summary, error) {
+	accounts, err := s.listAll()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Summary, 0, len(accounts))
+	for _, acc := range accounts {
+		out = append(out, acc.Summary())
+	}
+	return out, nil
+}
+
+// ListDetailed 返回全部账号，并带上 2FA 密钥与应用专用密码（管理端列表使用）。
+func (s *Store) ListDetailed() ([]DetailedSummary, error) {
+	accounts, err := s.listAll()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]DetailedSummary, 0, len(accounts))
+	for _, acc := range accounts {
+		out = append(out, DetailedSummary{
+			Summary:     acc.Summary(),
+			TOTPSecret:  acc.TOTPSecret,
+			AppPassword: acc.AppPassword,
+		})
+	}
+	return out, nil
+}
+
+func (s *Store) listAll() ([]Account, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -248,13 +287,13 @@ func (s *Store) List() ([]Summary, error) {
 	}
 	defer func() { _ = rows.Close() }()
 
-	out := make([]Summary, 0)
+	out := make([]Account, 0)
 	for rows.Next() {
 		acc, err := scanAccount(rows)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, acc.Summary())
+		out = append(out, acc)
 	}
 	return out, rows.Err()
 }

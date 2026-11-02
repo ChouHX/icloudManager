@@ -38,10 +38,13 @@ func TestGmailImportAndList(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("列表失败: %d %s", status, resp)
 	}
-	// 密码类字段绝不能出现在响应里
-	for _, secret := range []string{"login-pass", "JBSWY3DPEHPK3PXP", "app-pass"} {
-		if strings.Contains(resp, secret) {
-			t.Fatalf("响应泄露了密码字段 %q: %s", secret, resp)
+	// 登录密码绝不能出现在响应里；2FA 密钥与应用专用密码供管理端展示
+	if strings.Contains(resp, "login-pass") {
+		t.Fatalf("响应泄露了登录密码: %s", resp)
+	}
+	for _, visible := range []string{"JBSWY3DPEHPK3PXP", "app-pass"} {
+		if !strings.Contains(resp, visible) {
+			t.Fatalf("管理端列表应返回 %q: %s", visible, resp)
 		}
 	}
 	if !strings.Contains(resp, `"has_app_password":true`) {

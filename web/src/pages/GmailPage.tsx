@@ -5,6 +5,7 @@ import {
   Button,
   Card,
   Drawer,
+  Dropdown,
   Empty,
   Form,
   Input,
@@ -20,11 +21,14 @@ import {
 import type { TableProps } from 'antd'
 import {
   DeleteOutlined,
+  DisconnectOutlined,
+  DownOutlined,
   DownloadOutlined,
   FilterOutlined,
   InboxOutlined,
   LinkOutlined,
   ReloadOutlined,
+  SafetyCertificateOutlined,
   UploadOutlined,
 } from '@ant-design/icons'
 import { ApiError, request } from '../api/client'
@@ -399,16 +403,17 @@ export default function GmailPage() {
     [data],
   )
 
-  async function handleShare(account: GmailAccount) {
+  async function handleCopyLink(account: GmailAccount) {
     setBusyId(account.id)
     try {
+      // 已有链接会直接复用,没有则由后端创建(Ensure)
       const link = await request<GmailShareLink>(
         `/api/gmail/${encodeURIComponent(account.id)}/share-link`,
         { method: 'POST' },
       )
       try {
         await navigator.clipboard.writeText(link.url)
-        message.success('取件链接已生成并复制到剪贴板')
+        message.success('取件链接已复制')
       } catch {
         message.success('取件链接已生成')
         Modal.info({ title: '取件链接', content: link.url, okText: '知道了' })
@@ -479,43 +484,58 @@ export default function GmailPage() {
     {
       title: 'Gmail 账号',
       dataIndex: 'email',
+      width: 280,
       render: (email: string, record) => (
         <Space orientation="vertical" size={0}>
-          <Typography.Text className="mono" copyable={{ text: email }}>
+          <Typography.Text className="mono" copyable={{ text: email }} style={{ fontSize: 12 }}>
             {email}
           </Typography.Text>
-          <Space size={4} wrap>
-            <Tag color={record.has_app_password ? 'green' : 'gold'}>
-              {record.has_app_password ? '已配应用密码' : '缺应用密码'}
-            </Tag>
-            {record.has_totp && <Tag>2FA</Tag>}
+          <Space size={6} wrap>
             {record.status === 'error' && <Tag color="red">异常</Tag>}
+            {record.note && (
+              <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                {record.note}
+              </Typography.Text>
+            )}
+            {record.share_token && (
+              <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                链接已生成 · 访问 {record.share_hits ?? 0} 次
+              </Typography.Text>
+            )}
           </Space>
         </Space>
       ),
     },
     {
-      title: '取件链接',
-      dataIndex: 'share_token',
-      width: 200,
-      render: (token: string | undefined, record: GmailAccount) =>
-        token ? (
-          <Space size={4} wrap>
-            <Tag color="blue" icon={<LinkOutlined />}>
-              已生成
-            </Tag>
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              访问 {record.share_hits ?? 0} 次
-            </Typography.Text>
-          </Space>
+      title: '2FA 密钥',
+      dataIndex: 'totp_secret',
+      width: 230,
+      render: (value: string | undefined) =>
+        value ? (
+          <Typography.Text className="mono" copyable={{ text: value }} style={{ fontSize: 12 }}>
+            {value}
+          </Typography.Text>
         ) : (
-          <Typography.Text type="secondary">未生成</Typography.Text>
+          <Typography.Text type="secondary">—</Typography.Text>
+        ),
+    },
+    {
+      title: '应用专用密码',
+      dataIndex: 'app_password',
+      width: 190,
+      render: (value: string | undefined) =>
+        value ? (
+          <Typography.Text className="mono" copyable={{ text: value }} style={{ fontSize: 12 }}>
+            {value}
+          </Typography.Text>
+        ) : (
+          <Typography.Text type="secondary">—</Typography.Text>
         ),
     },
     {
       title: '最近检测',
       dataIndex: 'last_checked',
-      width: 160,
+      width: 150,
       render: (value: string | undefined, record: GmailAccount) => (
         <Tooltip title={record.last_error || ''}>
           <Typography.Text type={record.status === 'error' ? 'danger' : undefined} style={{ fontSize: 12 }}>
@@ -527,41 +547,64 @@ export default function GmailPage() {
     {
       title: '操作',
       key: 'actions',
-      width: 320,
+      width: 96,
       render: (_, record) => (
-        <Space size={4} wrap>
-          <Button size="small" icon={<InboxOutlined />} onClick={() => setPreviewTarget(record)}>
-            预览
+        <Dropdown
+          trigger={['click']}
+          menu={{
+            items: [
+              { key: 'preview', icon: <InboxOutlined />, label: '预览邮件' },
+              {
+                key: 'copy',
+                icon: <LinkOutlined />,
+                label: record.share_token ? '复制取件链接' : '生成并复制链接',
+              },
+              {
+                key: 'revoke',
+                icon: <DisconnectOutlined />,
+                label: '撤销取件链接',
+                danger: true,
+                disabled: !record.share_token,
+              },
+              { type: 'divider' },
+              { key: 'check', icon: <SafetyCertificateOutlined />, label: '检测应用密码' },
+              { type: 'divider' },
+              { key: 'delete', icon: <DeleteOutlined />, label: '删除账号', danger: true },
+            ],
+            onClick: ({ key }) => {
+              if (key === 'preview') {
+                setPreviewTarget(record)
+                return
+              }
+              if (key === 'copy') {
+                void handleCopyLink(record)
+                return
+              }
+              if (key === 'revoke') {
+                void handleRevoke(record)
+                return
+              }
+              if (key === 'check') {
+                void handleCheck(record)
+                return
+              }
+              if (key === 'delete') {
+                Modal.confirm({
+                  title: '删除该 Gmail 账号？',
+                  content: '删除后其取件链接会立即失效。',
+                  okText: '删除',
+                  okButtonProps: { danger: true },
+                  cancelText: '取消',
+                  onOk: () => void handleDelete(record),
+                })
+              }
+            },
+          }}
+        >
+          <Button size="small" loading={busyId === record.id}>
+            操作 <DownOutlined />
           </Button>
-          {record.share_token ? (
-            <Button size="small" danger loading={busyId === record.id} onClick={() => void handleRevoke(record)}>
-              撤销链接
-            </Button>
-          ) : (
-            <Button size="small" type="primary" loading={busyId === record.id} onClick={() => void handleShare(record)}>
-              生成链接
-            </Button>
-          )}
-          <Button size="small" loading={busyId === record.id} onClick={() => void handleCheck(record)}>
-            检测
-          </Button>
-          <Button
-            size="small"
-            danger
-            icon={<DeleteOutlined />}
-            loading={busyId === record.id}
-            onClick={() =>
-              Modal.confirm({
-                title: '删除该 Gmail 账号？',
-                content: '删除后其取件链接会立即失效。',
-                okText: '删除',
-                okButtonProps: { danger: true },
-                cancelText: '取消',
-                onOk: () => void handleDelete(record),
-              })
-            }
-          />
-        </Space>
+        </Dropdown>
       ),
     },
   ]
@@ -619,12 +662,14 @@ export default function GmailPage() {
           <Empty description="还没有 Gmail 账号，先批量导入一批" />
         ) : (
           <Table<GmailAccount>
+            className="gmail-table"
             rowKey="id"
+            size="small"
             columns={columns}
             dataSource={accounts}
             loading={loading}
             pagination={{ pageSize: 20, hideOnSinglePage: true, showSizeChanger: false }}
-            scroll={{ x: 1080 }}
+            scroll={{ x: 946 }}
           />
         )}
       </Card>

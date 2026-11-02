@@ -45,7 +45,7 @@ func gmailError(c *gin.Context, err error) {
 
 // listGmailHandler 处理 GET /api/gmail,返回全部账号与取件链接状态。
 func (s *Server) listGmailHandler(c *gin.Context) {
-	accounts, err := s.gmail.List()
+	accounts, err := s.gmail.ListDetailed()
 	if err != nil {
 		failCode(c, http.StatusInternalServerError, "INTERNAL_ERROR", "读取 Gmail 账号失败")
 		return
@@ -60,6 +60,8 @@ func (s *Server) listGmailHandler(c *gin.Context) {
 			"has_password":     account.HasPassword,
 			"has_totp":         account.HasTOTP,
 			"has_app_password": account.HasAppPassword,
+			"totp_secret":      account.TOTPSecret,
+			"app_password":     account.AppPassword,
 			"last_checked":     account.LastChecked,
 			"last_error":       account.LastError,
 			"created_at":       account.CreatedAt,

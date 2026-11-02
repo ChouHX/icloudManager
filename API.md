@@ -1044,7 +1044,8 @@ X-CSRF-Token: <token>
 
 管理员导入 Gmail 账号后，可为每个邮箱生成一个取件链接；未登录用户凭链接只能看到
 **符合全局过滤条件**的邮件（过滤是全局设置，对所有 Gmail 邮箱统一生效）。账号数据存放在 `data/gmail.db`（0600），
-密码、2FA 密钥、应用专用密码只写不读，接口只返回 `has_*` 布尔标记。
+登录密码只写不读；管理端账号列表会直接返回 `totp_secret` 与 `app_password`（便于查看/复制），
+取件等对外场景仍只返回 `has_*` 布尔标记。
 
 **批量导入**
 
@@ -1079,6 +1080,8 @@ GET /api/gmail
         "has_password": true,
         "has_totp": true,
         "has_app_password": true,
+        "totp_secret": "JBSWY3DPEHPK3PXP",
+        "app_password": "abcdefghijklmnop",
         "share_token": "…",
         "share_hits": 3,
         "last_checked": "2026-10-26T09:00:00+08:00"
