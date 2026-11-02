@@ -150,16 +150,12 @@ func TestFilterIsGlobalAndPersisted(t *testing.T) {
 	got, err := s.SetFilter(Filter{
 		Include: []string{" 验证码 ", "验证码", ""},
 		Exclude: []string{"广告"},
-		Days:    500,
 	})
 	if err != nil {
 		t.Fatalf("SetFilter: %v", err)
 	}
 	if len(got.Include) != 1 || got.Include[0] != "验证码" {
 		t.Fatalf("关键词应去空白去重: %+v", got.Include)
-	}
-	if got.Days != maxFilterDays {
-		t.Fatalf("天数应被限制为 %d,得到 %d", maxFilterDays, got.Days)
 	}
 	if err := s.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
@@ -172,7 +168,7 @@ func TestFilterIsGlobalAndPersisted(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = reopened.Close() })
 	again := reopened.Filter()
-	if len(again.Include) != 1 || again.Days != maxFilterDays {
+	if len(again.Include) != 1 || again.Include[0] != "验证码" {
 		t.Fatalf("全局过滤未持久化: %+v", again)
 	}
 }
@@ -201,26 +197,5 @@ func TestDuplicateEmailRejected(t *testing.T) {
 	}
 	if _, err := s.Create(Input{Email: "E@gmail.com"}); err == nil {
 		t.Fatal("重复邮箱应报错")
-	}
-}
-
-func TestEffectiveDays(t *testing.T) {
-	cases := []struct {
-		name      string
-		filter    Filter
-		requested int
-		want      int
-	}{
-		{name: "未设置窗口且不限时间", filter: Filter{}, requested: 0, want: 0},
-		{name: "管理员窗口作为默认值", filter: Filter{Days: 7}, requested: 0, want: 7},
-		{name: "管理员窗口作为上限", filter: Filter{Days: 7}, requested: 30, want: 7},
-		{name: "请求范围更小时以请求为准", filter: Filter{Days: 30}, requested: 7, want: 7},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := effectiveDays(tc.filter, tc.requested); got != tc.want {
-				t.Fatalf("effectiveDays = %d, want %d", got, tc.want)
-			}
-		})
 	}
 }

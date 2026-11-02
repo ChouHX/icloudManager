@@ -194,6 +194,45 @@ func (c *Client) ListInbox(limit int, days int) ([]Message, error) {
 	return c.fetchRefs(refs, limit)
 }
 
+// ListRecentAllFolders 拉取「所有邮件」范围内最近 limit 封邮件摘要。
+//
+// Gmail 的「所有邮件」([Gmail]/All Mail)包含收件箱、已归档与各标签下的邮件，
+// 但不含垃圾邮件，因此额外合并垃圾邮件文件夹；没有「所有邮件」时退回收件箱。
+// 结果跨文件夹合并后按时间倒序，再截断到 limit。
+func (c *Client) ListRecentAllFolders(limit int) ([]Message, error) {
+	if c.cli == nil {
+		return nil, fmt.Errorf("未连接")
+	}
+	if limit <= 0 {
+		limit = 10
+	}
+
+	infos, _ := c.listMailboxes()
+	primary := allMailFolder(infos)
+	if primary == "" {
+		primary = InboxFolder
+	}
+
+	refs, err := c.recentRefs(primary, limit, 0)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{primary: true}
+	// 垃圾邮件里的验证码同样要能取到,但单个文件夹失败不应拖垮整次取件。
+	for _, folder := range junkFoldersFrom(infos) {
+		if seen[folder] {
+			continue
+		}
+		seen[folder] = true
+		more, ferr := c.recentRefs(folder, limit, 0)
+		if ferr != nil {
+			continue
+		}
+		refs = append(refs, more...)
+	}
+	return c.fetchRefs(refs, limit)
+}
+
 // messageRef 是跨文件夹合并排序用的轻量邮件引用(不含正文)。
 type messageRef struct {
 	folder string
@@ -222,8 +261,8 @@ func collectRefs(folder string, days int, messages <-chan *imap.Message) []messa
 		if msg == nil {
 			continue
 		}
-		ref := messageRef{folder: folder, uid: msg.Uid}
-		if msg.Envelope != nil {
+		ref := messageRef{folder: folder, uid: msg.Uid, date: msg.InternalDate}
+		if msg.Envelope != nil && !msg.Envelope.Date.IsZero() {
 			ref.date = msg.Envelope.Date
 		}
 		if days > 0 && !ref.date.IsZero() && time.Since(ref.date) > time.Duration(days)*24*time.Hour {
@@ -334,8 +373,17 @@ func (c *Client) fetchMessagesByUID(folder string, uids []uint32) ([]Message, er
 // 优先用 SPECIAL-USE 属性(\Junk / \Spam)识别;部分服务端(尤其
 // Gmail 的非英文界面)不带属性,再按常见文件夹名兜底。
 func (c *Client) junkFolders() []string {
-	if c.cli == nil {
+	infos, err := c.listMailboxes()
+	if err != nil {
 		return nil
+	}
+	return junkFoldersFrom(infos)
+}
+
+// listMailboxes 返回服务端全部文件夹信息(一次 LIST)。
+func (c *Client) listMailboxes() ([]*imap.MailboxInfo, error) {
+	if c.cli == nil {
+		return nil, fmt.Errorf("未连接")
 	}
 	infos := make(chan *imap.MailboxInfo)
 	done := make(chan error, 1)
@@ -343,19 +391,76 @@ func (c *Client) junkFolders() []string {
 		done <- c.cli.List("", "*", infos)
 	}()
 
+	var out []*imap.MailboxInfo
+	for info := range infos {
+		if info != nil {
+			out = append(out, info)
+		}
+	}
+	if err := <-done; err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// junkFoldersFrom 从 LIST 结果里挑出垃圾邮件文件夹。
+func junkFoldersFrom(infos []*imap.MailboxInfo) []string {
 	var out []string
 	seen := make(map[string]bool)
-	for info := range infos {
+	for _, info := range infos {
 		if info == nil || info.Name == "" || seen[info.Name] || !isJunkMailbox(info) {
 			continue
 		}
 		seen[info.Name] = true
 		out = append(out, info.Name)
 	}
-	if err := <-done; err != nil {
-		return nil
-	}
 	return out
+}
+
+// allMailFolder 从 LIST 结果里找出「所有邮件」文件夹。
+//
+// 优先用 SPECIAL-USE 的 \All 属性;部分服务端不带属性,再按常见名称兜底。
+// 没有该文件夹时返回空串,调用方退回收件箱。
+func allMailFolder(infos []*imap.MailboxInfo) string {
+	for _, info := range infos {
+		if info == nil || info.Name == "" || isNoSelect(info) {
+			continue
+		}
+		for _, attr := range info.Attributes {
+			if strings.EqualFold(attr, imap.AllAttr) {
+				return info.Name
+			}
+		}
+	}
+	for _, info := range infos {
+		if info == nil || info.Name == "" || isNoSelect(info) {
+			continue
+		}
+		// LIST 返回的是 modified UTF-7(中文文件夹名会被编码),先解码再匹配。
+		name := strings.TrimSpace(info.Name)
+		if decoded, err := utf7.Encoding.NewDecoder().String(name); err == nil {
+			name = decoded
+		}
+		name = strings.ToLower(name)
+		if idx := strings.LastIndexAny(name, "/."); idx >= 0 {
+			name = name[idx+1:]
+		}
+		switch strings.TrimSpace(name) {
+		case "all mail", "all", "所有邮件", "所有郵件":
+			return info.Name
+		}
+	}
+	return ""
+}
+
+// isNoSelect 判断文件夹是否不可选中(容器节点)。
+func isNoSelect(info *imap.MailboxInfo) bool {
+	for _, attr := range info.Attributes {
+		if strings.EqualFold(attr, imap.NoSelectAttr) {
+			return true
+		}
+	}
+	return false
 }
 
 // isJunkMailbox 判断 LIST 返回的文件夹是否为垃圾邮件文件夹。

@@ -79,12 +79,12 @@ func TestGmailImportAndList(t *testing.T) {
 
 	// 过滤是全局设置，不再按账号配置
 	status, resp, _ = do(t, tagAuthed(t, ts, sess, csrf, "PUT", "/api/gmail/filter",
-		`{"include":["验证码"],"exclude":["广告"],"days":500}`))
+		`{"include":["验证码"],"exclude":["广告"]}`))
 	if status != http.StatusOK {
 		t.Fatalf("更新过滤失败: %d %s", status, resp)
 	}
-	if !strings.Contains(resp, `"days":90`) {
-		t.Fatalf("天数应被限制为 90: %s", resp)
+	if strings.Contains(resp, `"days"`) {
+		t.Fatalf("过滤条件不应再包含天数: %s", resp)
 	}
 	// 列表里也能读到同一份全局过滤
 	status, resp, _ = do(t, tagAuthed(t, ts, sess, csrf, "GET", "/api/gmail", ""))

@@ -14,6 +14,10 @@ const (
 	// IMAPPort 是 IMAP over TLS 端口。
 	IMAPPort = 993
 
+	// DefaultLimit 是取件页默认展示的邮件数。
+	DefaultLimit = 10
+	// MaxLimit 是取件页允许选择的邮件数上限。
+	MaxLimit = 30
 	// maxFetchLimit 是单次拉取的上限，避免一次读取过多邮件。
 	maxFetchLimit = 100
 	// fetchFactor 是过滤前的放大倍数：过滤会丢掉部分邮件，多取一些再截断。
@@ -59,18 +63,11 @@ func (f Filter) MatchMessage(m *mail.FullMessage) bool {
 	return f.Match(m.Message)
 }
 
-// effectiveDays 返回实际生效的时间窗口：管理员配置的天数会作为上限。
-func effectiveDays(filter Filter, requested int) int {
-	if filter.Days > 0 && (requested <= 0 || filter.Days < requested) {
-		return filter.Days
-	}
-	return requested
-}
-
-// Inbox 拉取指定账号的收件箱，并应用管理员的过滤条件。
+// Inbox 拉取指定账号最近 limit 封邮件，并应用管理员的过滤条件。
 //
+// 取件范围覆盖「所有邮件」（含已归档）与垃圾邮件文件夹，按时间倒序合并。
 // 返回的邮件数不超过 limit；method 固定为 imap，便于前端统一展示。
-func (s *Store) Inbox(id string, limit, days int) ([]mail.Message, string, error) {
+func (s *Store) Inbox(id string, limit int) ([]mail.Message, string, error) {
 	acc, ok := s.Get(id)
 	if !ok {
 		return nil, "", fmt.Errorf("账号不存在")
@@ -79,13 +76,12 @@ func (s *Store) Inbox(id string, limit, days int) ([]mail.Message, string, error
 		return nil, "", ErrNoAppPassword
 	}
 	if limit <= 0 {
-		limit = 20
+		limit = DefaultLimit
 	}
-	if limit > maxFetchLimit {
-		limit = maxFetchLimit
+	if limit > MaxLimit {
+		limit = MaxLimit
 	}
 	filter := s.Filter()
-	days = effectiveDays(filter, days)
 
 	fetch := limit * fetchFactor
 	if fetch > maxFetchLimit {
@@ -99,7 +95,7 @@ func (s *Store) Inbox(id string, limit, days int) ([]mail.Message, string, error
 	}
 	defer cli.Disconnect()
 
-	messages, err := cli.ListInbox(fetch, days)
+	messages, err := cli.ListRecentAllFolders(fetch)
 	if err != nil {
 		s.MarkChecked(id, err.Error())
 		return nil, "", fmt.Errorf("读取 Gmail 收件箱失败: %w", err)

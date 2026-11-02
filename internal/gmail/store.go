@@ -35,8 +35,6 @@ const (
 	maxNoteLen     = 500
 	maxFilterItems = 50
 	maxFilterLen   = 100
-	// maxFilterDays 限制过滤窗口天数。
-	maxFilterDays = 90
 )
 
 // Filter 是管理员配置的**全局**取件过滤条件，对所有 Gmail 邮箱生效。
@@ -44,11 +42,9 @@ const (
 // 关键词按「主题或发件人包含任一关键词」命中（忽略大小写）：
 //   - Include 为空表示不限制；否则只有命中的邮件可见
 //   - Exclude 命中的邮件一律隐藏（优先级高于 Include）
-//   - Days 只显示最近 N 天（0 表示不限制，最大 90）
 type Filter struct {
 	Include []string `json:"include"`
 	Exclude []string `json:"exclude"`
-	Days    int      `json:"days"`
 }
 
 // Account 是一条 Gmail 账号记录（含密码类字段，仅内部使用）。
@@ -606,7 +602,7 @@ func normalize(in Input) (email, password, totp, appPassword, note string, err e
 	return email, password, totp, appPassword, note, nil
 }
 
-// normalizeFilter 规整过滤条件：去空白、去重、限制数量与天数。
+// normalizeFilter 规整过滤条件：去空白、去重、限制数量。
 func normalizeFilter(f Filter) (Filter, error) {
 	include, err := normalizeKeywords(f.Include)
 	if err != nil {
@@ -616,14 +612,7 @@ func normalizeFilter(f Filter) (Filter, error) {
 	if err != nil {
 		return Filter{}, err
 	}
-	days := f.Days
-	if days < 0 {
-		days = 0
-	}
-	if days > maxFilterDays {
-		days = maxFilterDays
-	}
-	return Filter{Include: include, Exclude: exclude, Days: days}, nil
+	return Filter{Include: include, Exclude: exclude}, nil
 }
 
 func normalizeKeywords(items []string) ([]string, error) {

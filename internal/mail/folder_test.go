@@ -33,6 +33,48 @@ func TestIsJunkMailbox(t *testing.T) {
 	}
 }
 
+func TestAllMailFolder(t *testing.T) {
+	utf7All := encodeUTF7(t, "[Gmail]/所有邮件")
+	cases := []struct {
+		name  string
+		infos []*imap.MailboxInfo
+		want  string
+	}{
+		{
+			name:  "special-use 属性",
+			infos: []*imap.MailboxInfo{{Name: "[Gmail]/All Mail", Attributes: []string{imap.AllAttr}}},
+			want:  "[Gmail]/All Mail",
+		},
+		{
+			name:  "英文名称兜底",
+			infos: []*imap.MailboxInfo{{Name: "INBOX"}, {Name: "[Gmail]/All Mail"}},
+			want:  "[Gmail]/All Mail",
+		},
+		{
+			name:  "UTF-7 中文名称",
+			infos: []*imap.MailboxInfo{{Name: utf7All}},
+			want:  utf7All,
+		},
+		{
+			name:  "不可选中时忽略",
+			infos: []*imap.MailboxInfo{{Name: "[Gmail]/All Mail", Attributes: []string{imap.NoSelectAttr}}},
+			want:  "",
+		},
+		{
+			name:  "没有所有邮件",
+			infos: []*imap.MailboxInfo{{Name: "INBOX"}, {Name: "[Gmail]/Spam"}},
+			want:  "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := allMailFolder(tc.infos); got != tc.want {
+				t.Fatalf("allMailFolder = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestToMessageKeepsNumericIDAndFolder(t *testing.T) {
 	msg := &imap.Message{Uid: 1042, Envelope: &imap.Envelope{}}
 

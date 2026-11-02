@@ -8,7 +8,6 @@ import {
   Empty,
   Form,
   Input,
-  InputNumber,
   Modal,
   Select,
   Space,
@@ -44,10 +43,10 @@ import type {
 import MailBody from '../components/MailBody'
 import { formatDateTime } from '../utils/format'
 
-const DAY_OPTIONS = [
-  { value: 1, label: '近 1 天' },
-  { value: 7, label: '近 7 天' },
-  { value: 30, label: '近 30 天' },
+const LIMIT_OPTIONS = [
+  { value: 10, label: '最近 10 封' },
+  { value: 20, label: '最近 20 封' },
+  { value: 30, label: '最近 30 封' },
 ]
 
 const IMPORT_HELP =
@@ -71,7 +70,6 @@ function describeFilter(filter: GmailFilter): string {
   const parts: string[] = []
   if (filter.include.length > 0) parts.push(`仅含 ${filter.include.join(' / ')}`)
   if (filter.exclude.length > 0) parts.push(`排除 ${filter.exclude.join(' / ')}`)
-  if (filter.days > 0) parts.push(`近 ${filter.days} 天`)
   return parts.length > 0 ? parts.join('，') : '不限制'
 }
 
@@ -226,7 +224,6 @@ function GmailFilterModal({
         body: {
           include: values.include ?? [],
           exclude: values.exclude ?? [],
-          days: values.days ?? 0,
         },
       })
       onSaved()
@@ -257,8 +254,8 @@ function GmailFilterModal({
         preserve={false}
         initialValues={
           filter
-            ? { include: filter.include, exclude: filter.exclude, days: filter.days }
-            : { include: [], exclude: [], days: 0 }
+            ? { include: filter.include, exclude: filter.exclude }
+            : { include: [], exclude: [] }
         }
       >
         <Form.Item
@@ -270,9 +267,6 @@ function GmailFilterModal({
         </Form.Item>
         <Form.Item name="exclude" label="排除包含这些关键词的邮件" extra="优先级高于上面的包含规则">
           <Select mode="tags" placeholder="例如：广告、推广" tokenSeparators={[',', '，']} />
-        </Form.Item>
-        <Form.Item name="days" label="时间窗口（天）" extra="0 表示不限制，最多 90 天">
-          <InputNumber min={0} max={90} style={{ width: 160 }} />
         </Form.Item>
       </Form>
     </Modal>
@@ -289,14 +283,13 @@ function GmailInboxDrawer({
   filter: GmailFilter
   onClose: () => void
 }) {
-  const [days, setDays] = useState(7)
-  const [limit, setLimit] = useState(20)
+  const [limit, setLimit] = useState(10)
   const [detail, setDetail] = useState<FullMessage | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailError, setDetailError] = useState('')
 
   const url = account
-    ? `/api/gmail/${encodeURIComponent(account.id)}/inbox?limit=${limit}&days=${days}`
+    ? `/api/gmail/${encodeURIComponent(account.id)}/inbox?limit=${limit}`
     : null
   const { data, loading, error, reload } = useFetch<ShareInboxResult>(url)
 
@@ -350,16 +343,7 @@ function GmailInboxDrawer({
       }}
       extra={
         <Space>
-          <Select value={days} style={{ width: 110 }} options={DAY_OPTIONS} onChange={setDays} />
-          <Select
-            value={limit}
-            style={{ width: 90 }}
-            options={[
-              { value: 20, label: '20 封' },
-              { value: 50, label: '50 封' },
-            ]}
-            onChange={setLimit}
-          />
+          <Select value={limit} style={{ width: 130 }} options={LIMIT_OPTIONS} onChange={setLimit} />
           <Button icon={<ReloadOutlined />} onClick={reload} loading={loading} aria-label="刷新" />
         </Space>
       }
@@ -411,7 +395,7 @@ export default function GmailPage() {
 
   const accounts = useMemo(() => data?.accounts ?? [], [data])
   const globalFilter = useMemo<GmailFilter>(
-    () => data?.filter ?? { include: [], exclude: [], days: 0 },
+    () => data?.filter ?? { include: [], exclude: [] },
     [data],
   )
 

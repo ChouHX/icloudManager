@@ -19,6 +19,12 @@ const LIMIT_OPTIONS = [
   { value: 50, label: '50 封' },
 ]
 
+const GMAIL_LIMIT_OPTIONS = [
+  { value: 10, label: '最近 10 封' },
+  { value: 20, label: '最近 20 封' },
+  { value: 30, label: '最近 30 封' },
+]
+
 /**
  * 凭取件链接访问的独立界面。
  *
@@ -36,6 +42,7 @@ export default function PublicInboxPage({
 }) {
   const [days, setDays] = useState(7)
   const [limit, setLimit] = useState(20)
+  const [gmailLimit, setGmailLimit] = useState(10)
   const [detail, setDetail] = useState<FullMessage | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailError, setDetailError] = useState('')
@@ -45,9 +52,9 @@ export default function PublicInboxPage({
       ? `/api/gmail-share/${encodeURIComponent(token)}/inbox`
       : `/api/share/${encodeURIComponent(token)}/inbox`
 
-  // Gmail 取件固定「最近 10 封、不限时间」,不接受调用方传参
+  // Gmail 取件只按条数取最近邮件(所有文件夹,含垃圾邮件),不提供时间范围
   const url =
-    kind === 'gmail' ? base : `${base}?limit=${limit}&days=${days}`
+    kind === 'gmail' ? `${base}?limit=${gmailLimit}` : `${base}?limit=${limit}&days=${days}`
   const { data, loading, error, reload } = useFetch<ShareInboxResult>(url)
 
   async function openMessage(record: InboxMessage) {
@@ -147,9 +154,17 @@ export default function PublicInboxPage({
           title={`收件箱${data ? ` · ${data.count} 封` : ''}`}
           extra={
             kind === 'gmail' ? (
-              <Button icon={<ReloadOutlined />} onClick={reload} loading={loading} aria-label="刷新">
-                刷新
-              </Button>
+              <Space>
+                <Select
+                  value={gmailLimit}
+                  style={{ width: 130 }}
+                  options={GMAIL_LIMIT_OPTIONS}
+                  onChange={setGmailLimit}
+                />
+                <Button icon={<ReloadOutlined />} onClick={reload} loading={loading} aria-label="刷新">
+                  刷新
+                </Button>
+              </Space>
             ) : (
               <Space>
                 <Select value={days} style={{ width: 120 }} options={DAY_OPTIONS} onChange={setDays} />

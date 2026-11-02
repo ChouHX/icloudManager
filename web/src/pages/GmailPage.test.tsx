@@ -15,7 +15,7 @@ describe('GmailPage', () => {
     expect(await screen.findByText('mail@gmail.com')).toBeInTheDocument()
     expect(screen.getByText('已配应用密码')).toBeInTheDocument()
     // 过滤条件是全局的，展示在列表标题上
-    expect(screen.getByText(/账号列表 · 全局过滤：仅含 验证码，近 7 天/)).toBeInTheDocument()
+    expect(screen.getByText(/账号列表 · 全局过滤：仅含 验证码/)).toBeInTheDocument()
     expect(screen.getByText('未生成')).toBeInTheDocument()
   })
 

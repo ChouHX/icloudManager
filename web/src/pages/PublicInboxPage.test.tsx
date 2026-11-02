@@ -59,7 +59,7 @@ describe('PublicInboxPage', () => {
     expect(screen.getByText('近 7 天')).toBeInTheDocument()
   })
 
-  it('Gmail 取件页只显示邮箱与最近邮件，不提供筛选', async () => {
+  it('Gmail 取件页只显示邮箱与最近邮件，可按条数选择', async () => {
     renderPage(<PublicInboxPage token="gmail-token" kind="gmail" />, {
       route: '/?gtoken=gmail-token',
       path: '/',
@@ -72,8 +72,10 @@ describe('PublicInboxPage', () => {
     expect(screen.queryByText(/只读页面/)).not.toBeInTheDocument()
 
     expect(screen.getByText('您的验证码是 123456')).toBeInTheDocument()
-    // 不能自选条数/时间范围，只有刷新
-    expect(screen.queryAllByRole('combobox')).toHaveLength(0)
+    // 只保留条数选择（10/20/30），没有时间范围
+    expect(screen.getAllByRole('combobox')).toHaveLength(1)
+    expect(screen.getByText('最近 10 封')).toBeInTheDocument()
+    expect(screen.queryByText(/近 \d+ 天/)).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '刷新' })).toBeInTheDocument()
   })
 })

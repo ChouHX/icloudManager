@@ -1070,7 +1070,7 @@ GET /api/gmail
   "success": true,
   "data": {
     "count": 1,
-    "filter": { "include": ["验证码"], "exclude": ["广告"], "days": 7 },
+    "filter": { "include": ["验证码"], "exclude": ["广告"] },
     "accounts": [
       {
         "id": "gm_1a2b3c4d",
@@ -1105,12 +1105,11 @@ GET /api/gmail
 PUT /api/gmail/filter
 X-CSRF-Token: <token>
 
-{ "include": ["验证码", "noreply"], "exclude": ["广告"], "days": 7 }
+{ "include": ["验证码", "noreply"], "exclude": ["广告"] }
 ```
 
 - `include`：主题或发件人包含任一关键词才可见（忽略大小写）；为空表示不限制
 - `exclude`：命中任一关键词一律隐藏，优先级高于 `include`
-- `days`：只显示最近 N 天，`0` 表示不限制，上限 90
 - 过滤对所有 Gmail 邮箱统一生效，`GET /api/gmail` 的 `filter` 字段即当前设置
 
 **取件链接**
@@ -1156,8 +1155,9 @@ GET /api/gmail-share/:token/inbox/:message_id
 
 返回结构与 iCloud 别名取件一致（`alias`/`count`/`messages`/`method`），但：
 
-- 固定返回**最近 10 封、不限时间**的邮件，不接受 `limit` / `days` 参数
-- 邮件已按**全局过滤条件**筛选；若全局设置了时间窗口，则以该窗口为准
+- 返回**所有文件夹**（「所有邮件」含已归档与各标签，外加垃圾邮件）中最近的邮件，按时间倒序合并
+- `limit` 可选 `10`（默认）、`20`、`30`，越界或非整数返回 `400`；不再支持按天数筛选
+- 邮件已按**全局过滤条件**筛选
 - 单封邮件会再次核对过滤条件，命中范围外一律返回 `404`
 - 响应不包含账号 ID 与过滤条件
 

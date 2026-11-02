@@ -548,7 +548,7 @@ export const handlers = [
       success: true,
       data: {
         count: GMAIL_ACCOUNTS.length,
-        filter: { include: ['验证码'], exclude: [], days: 7 },
+        filter: { include: ['验证码'], exclude: [] },
         accounts: GMAIL_ACCOUNTS,
       },
     }),
@@ -560,10 +560,10 @@ export const handlers = [
     }),
   ),
   http.put('/api/gmail/filter', async ({ request }) => {
-    const body = (await request.json()) as { include?: string[]; exclude?: string[]; days?: number }
+    const body = (await request.json()) as { include?: string[]; exclude?: string[] }
     return HttpResponse.json({
       success: true,
-      data: { include: body.include ?? [], exclude: body.exclude ?? [], days: body.days ?? 0 },
+      data: { include: body.include ?? [], exclude: body.exclude ?? [] },
     })
   }),
   http.post('/api/gmail/share-links', () =>

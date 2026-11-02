@@ -75,8 +75,6 @@ export interface GmailFilter {
   include: string[]
   /** 命中任一关键词则隐藏，优先级高于 include */
   exclude: string[]
-  /** 只显示最近 N 天，0 表示不限制（后端上限 90） */
-  days: number
 }
 
 /** Gmail 账号（不含任何密码字段） */
