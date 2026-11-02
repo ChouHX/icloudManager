@@ -13,10 +13,8 @@ describe('GmailPage', () => {
     renderGmail()
 
     expect(await screen.findByText('mail@gmail.com')).toBeInTheDocument()
-    // 2FA 密钥与应用专用密码直接展示
-    expect(screen.getByText('2FA 密钥')).toBeInTheDocument()
+    // 2FA 密钥与应用专用密码直接展示（表头文案与导入弹窗重复，只断言值）
     expect(screen.getByText('JBSWY3DPEHPK3PXP')).toBeInTheDocument()
-    expect(screen.getByText('应用专用密码')).toBeInTheDocument()
     expect(screen.getByText('abcdefghijklmnop')).toBeInTheDocument()
     // 过滤条件是全局的，展示在列表标题上
     expect(screen.getByText(/账号列表 · 全局过滤：仅含 验证码/)).toBeInTheDocument()
@@ -72,6 +70,6 @@ describe('GmailPage', () => {
 
     await user.click(screen.getByRole('button', { name: /操作/ }))
     await user.click(await screen.findByText('生成并复制链接'))
-    expect(await screen.findByText(/取件链接已生成/)).toBeInTheDocument()
+    expect(await screen.findByText('取件链接已复制')).toBeInTheDocument()
   })
 })
